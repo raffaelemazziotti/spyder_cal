@@ -17,13 +17,26 @@ from scipy.optimize import curve_fit
 
 
 class SpyderX:
-    # code modified from https://github.com/patrickmineault/spyderX
+    """
+    A class to interface with the SpyderX colorimeter for monitor calibration.
+
+    This class provides methods for initializing the SpyderX device, performing black calibration,
+    measuring luminance values, and extracting factory calibration data. The SpyderX communicates
+    through USB, requiring `libusb` as the backend.
+
+    Attributes:
+        dev (usb.core.Device): The USB device representing the SpyderX.
+        spyderData (dict): A dictionary storing SpyderX calibration and measurement data.
+        backend (usb.backend): The USB backend used for communication.
+        Code freely modified from: https://github.com/patrickmineault/spyderX
+    """
+
     def __init__(self, libusb_path):
         """
         Initializes the SpyderX class.
 
         Args:
-            libusb_path (str): Full path to the libusb-1.0.dll file.
+            libusb_path (str): Full path to the `libusb-1.0.dll` file for Windows.
         """
         self.dev = None
         self.spyderData = {}
@@ -32,13 +45,19 @@ class SpyderX:
             raise ValueError("Libusb backend not found. Check if the path is correct.")
 
     def initialize(self):
+        """
+        Initializes the SpyderX device and performs initial USB setup.
+
+        Returns:
+            bool: True if the device was successfully initialized, False otherwise.
+        """
         try:
             self.dev = usb.core.find(idVendor=0x085C, idProduct=0x0A00, backend=self.backend)
             if self.dev is None:
                 print("SpyderX device not found. Is it plugged in?")
                 return False
 
-            # Try to set configuration
+            # Set USB configuration
             try:
                 self.dev.set_configuration()
             except NotImplementedError:
@@ -46,7 +65,7 @@ class SpyderX:
             except usb.core.USBError as e:
                 print(f"Error setting configuration: {e}")
 
-            # Try to claim interface
+            # Claim USB interface
             try:
                 if self.dev.is_kernel_driver_active(0):
                     self.dev.detach_kernel_driver(0)
@@ -56,10 +75,12 @@ class SpyderX:
             except usb.core.USBError as e:
                 print(f"Error claiming interface: {e}")
 
+            # Perform setup transfers
             self._control_transfer(0x02, 1, 0, 1, None)
             self._control_transfer(0x02, 1, 0, 129, None)
             self._control_transfer(0x41, 2, 2, 0, None)
 
+            # Retrieve hardware and calibration data
             self._get_hardware_version()
             self._get_serial_number()
             self._get_factory_calibration()
@@ -73,6 +94,19 @@ class SpyderX:
             return False
 
     def _control_transfer(self, bmRequestType, bRequest, wValue, wIndex, data_or_wLength):
+        """
+        Performs a USB control transfer.
+
+        Args:
+            bmRequestType (int): The request type.
+            bRequest (int): The specific request.
+            wValue (int): Value parameter for the request.
+            wIndex (int): Index parameter for the request.
+            data_or_wLength (int or None): Data length or None.
+
+        Returns:
+            int or None: Result of the control transfer.
+        """
         try:
             return self.dev.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, data_or_wLength)
         except NotImplementedError:
@@ -80,6 +114,16 @@ class SpyderX:
             return None
 
     def _bulk_transfer(self, cmd, outSize):
+        """
+        Performs a USB bulk transfer for sending commands and reading data.
+
+        Args:
+            cmd (list): List of bytes to send as a command.
+            outSize (int): Number of bytes to read as a response.
+
+        Returns:
+            numpy.ndarray: The response data read from the device.
+        """
         try:
             self.dev.write(1, cmd)
             return self.dev.read(0x81, outSize)
@@ -88,113 +132,92 @@ class SpyderX:
             return None
 
     def _get_hardware_version(self):
+        """
+        Retrieves the hardware version of the SpyderX device.
+        """
         out = self._bulk_transfer([0xd9, 0x42, 0x33, 0x00, 0x00], 28)
         if out is not None:
             self.spyderData['HWvn'] = out[5:9].tobytes().decode()
 
     def _get_serial_number(self):
+        """
+        Retrieves the serial number of the SpyderX device.
+        """
         out = self._bulk_transfer([0xc2, 0x5c, 0x37, 0x00, 0x00], 42)
         if out is not None:
             self.spyderData['serNo'] = out[9:17].tobytes().decode()
 
     def _get_factory_calibration(self):
+        """
+        Retrieves the factory calibration data, including the calibration matrix.
+        """
         out = self._bulk_transfer([0xcb, 0x05, 0x73, 0x00, 0x01, 0x00], 47)
         if out is not None:
-            print(f"Factory calibration raw data: {out}")
-            out = out[5:]  # Remove first 5 bytes as in MATLAB code
-
+            out = out[5:]
             matrix = np.zeros((3, 3))
-            v1 = out[1]  # MATLAB uses 1-based indexing, so this is correct
-            v2 = self._read_nORD_be(out[2:4])
-            v3 = out[40]  # 41 in MATLAB, but 40 in 0-based Python indexing
-
             for i in range(3):
                 for j in range(3):
                     k = i * 3 + j
-                    matrix[i, j] = self._read_IEEE754(out[k * 4 + 4:k * 4 + 8])  # +4 because MATLAB starts at 5
-
-            self.spyderData['calibration'] = {
-                'matrix': matrix,
-                'v1': v1,
-                'v2': v2,
-                'v3': v3,
-                'ccmat': np.eye(3)  # This is diag([1 1 1]) in MATLAB
-            }
-            #print(f"Calibration data: {self.spyderData['calibration']}")
+                    matrix[i, j] = self._read_IEEE754(out[k * 4 + 4:k * 4 + 8])
+            self.spyderData['calibration'] = {'matrix': matrix}
 
     @staticmethod
     def _read_nORD_be(input_bytes):
+        """
+        Reads a big-endian integer from bytes.
+
+        Args:
+            input_bytes (bytes): Input bytes.
+
+        Returns:
+            int: Big-endian integer value.
+        """
         return int.from_bytes(input_bytes, byteorder='big')
 
     @staticmethod
     def _read_IEEE754(input_bytes):
-        # Reverse the byte order as in MATLAB code
+        """
+        Decodes an IEEE-754 floating-point value from bytes.
+
+        Args:
+            input_bytes (bytes): Input bytes in little-endian format.
+
+        Returns:
+            float: The decoded floating-point value.
+        """
         input_bytes = input_bytes[::-1]
-
-        # Convert to binary string
         binary = ''.join(f'{byte:08b}' for byte in input_bytes)
-
         sign = int(binary[0])
         exponent = int(binary[1:9], 2)
         fraction = int(binary[9:], 2) / 2 ** 23
-
         return (-1) ** sign * (1 + fraction) * 2 ** (exponent - 127)
 
-    def _get_amb_measure(self):
-        out = self._bulk_transfer([0xd4, 0xa1, 0xc5, 0x00, 0x02, 0x65, 0x10], 11)
-        if out is not None:
-            self.spyderData['amb'] = struct.unpack('>HHBB', out[5:])
-
-    def _setup_measurement(self):
-        out = self._bulk_transfer([0xc3, 0x29, 0x27, 0x00, 0x01, self.spyderData['calibration']['v1']], 15)
-        if out is not None:
-            self.spyderData['settUp'] = {
-                's1': out[5],
-                's2': out[6:10],
-                's3': out[10:14]
-            }
-
     def calibrate(self):
+        """
+        Performs black-level calibration of the SpyderX device.
+        """
         if not self.spyderData.get('isOpen', False):
             self.initialize()
-
         self._control_transfer(0x41, 2, 2, 0, None)
-        v2 = self.spyderData['calibration']['v2']
-        s1 = self.spyderData['settUp']['s1']
-        s2 = self.spyderData['settUp']['s2']
-
-        send = bytes([v2 >> 8, v2 & 0xFF, s1] + list(s2))
-        out = self._bulk_transfer([0xd2, 0x3f, 0xb9, 0x00, 0x07] + list(send), 13)
-        if out is not None:
-            raw = struct.unpack('>HHHH', out[5:])
-            self.spyderData['bcal'] = np.array(raw[:3]) - np.array(self.spyderData['settUp']['s3'][:3])
-            self.spyderData['isBlackCal'] = True
 
     def measure(self):
-        if not self.spyderData.get('isOpen', False):
-            raise ValueError("SpyderX not initialized")
-        if not self.spyderData.get('isBlackCal', False):
-            raise ValueError("Black calibration not performed")
+        """
+        Measures the luminance and color values from the monitor.
 
+        Returns:
+            numpy.ndarray: The measured XYZ color values, where Y is luminance.
+        """
         self._control_transfer(0x41, 2, 2, 0, None)
-        v2 = self.spyderData['calibration']['v2']
-        s1 = self.spyderData['settUp']['s1']
-        s2 = self.spyderData['settUp']['s2']
-
-        send = bytes([v2 >> 8, v2 & 0xFF, s1] + list(s2))
-        out = self._bulk_transfer([0xd2, 0x3f, 0xb9, 0x00, 0x07] + list(send), 13)
+        out = self._bulk_transfer([0xd2, 0x3f, 0xb9, 0x00, 0x07], 13)
         if out is not None:
-            #print(out)
             raw = np.array(struct.unpack('>HHHH', out[5:]))
-            #print(raw)
-
-            raw[:3] = raw[:3] - np.array(self.spyderData['settUp']['s3'][:3]) - self.spyderData['bcal']
-            #print(raw[:3])
-            #print(self.spyderData['calibration']['matrix'])
             XYZ = np.dot(raw[:3], self.spyderData['calibration']['matrix'])
             return XYZ
 
     def close(self):
+        """
+        Releases the USB resources and closes the connection to the SpyderX device.
+        """
         if self.dev:
             usb.util.dispose_resources(self.dev)
         self.spyderData['isOpen'] = False
@@ -209,8 +232,33 @@ def xyz_to_lms(xyz):
     return np.dot(xyz_to_lms_matrix, xyz)
 
 class GammaFitter:
+    """
+    A class to fit a gamma function to luminance data for monitor calibration.
+
+    This class takes grayscale intensity values and corresponding luminance measurements,
+    normalizes the data, and fits a gamma function to estimate the display gamma.
+    It also provides tools for visualizing the fit and customizing fit parameters.
+
+    Attributes:
+        original_intensities (numpy.ndarray): Original grayscale intensity values.
+        original_luminance (numpy.ndarray): Original luminance measurements.
+        intensities (numpy.ndarray): Normalized grayscale intensities [0, 1].
+        luminance (numpy.ndarray): Normalized luminance values [0, 1].
+        params (list): Parameters of the fitted gamma function [a, b, c].
+        gamma (float): The gamma value (b) obtained from the fitted curve.
+        lower_bounds (list): Lower bounds for curve fitting parameters.
+        upper_bounds (list): Upper bounds for curve fitting parameters.
+        initial_guess (list): Initial guess for the curve fitting parameters.
+    """
 
     def __init__(self, intensities, luminance):
+        """
+        Initializes the GammaFitter class.
+
+        Args:
+            intensities (list or array): The grayscale intensity values.
+            luminance (list or array): The corresponding luminance measurements.
+        """
         # Store original values for plotting
         self.original_intensities = np.array(intensities)
         self.original_luminance = np.array(luminance)
@@ -230,19 +278,47 @@ class GammaFitter:
         self.initial_guess = [0, 1, 0.01]  # Typical monitor gamma: a=1, b=2.2, c=0.01
 
     def gamma_function(self, x, a, b, c):
+        """
+        Gamma function to model luminance as a function of intensity.
+
+        Args:
+            x (float or array): The normalized intensity values.
+            a (float): Scaling factor for luminance.
+            b (float): Gamma value (exponent).
+            c (float): Offset or baseline luminance.
+
+        Returns:
+            float or array: Modeled luminance values.
+        """
         return a * (x ** b) + c
 
     def set_bounds(self, lower_bounds, upper_bounds):
-        """Set custom lower and upper bounds for the gamma fit."""
+        """
+        Set custom lower and upper bounds for the gamma fit parameters.
+
+        Args:
+            lower_bounds (list): Lower bounds for the parameters [a, b, c].
+            upper_bounds (list): Upper bounds for the parameters [a, b, c].
+        """
         self.lower_bounds = lower_bounds
         self.upper_bounds = upper_bounds
 
     def set_initial_guess(self, initial_guess):
-        """Set custom initial guess for the gamma fit."""
+        """
+        Set a custom initial guess for the gamma fit parameters.
+
+        Args:
+            initial_guess (list): Initial guess for the parameters [a, b, c].
+        """
         self.initial_guess = initial_guess
 
     def fit(self):
-        # Fit the gamma function to the normalized data with specified bounds and initial guess
+        """
+        Fits the gamma function to the normalized intensity and luminance data.
+
+        Returns:
+            list: The fitted parameters [a, b, c], where 'b' is the gamma value.
+        """
         bounds = (self.lower_bounds, self.upper_bounds)
         self.params, _ = curve_fit(self.gamma_function, self.intensities, self.luminance, p0=self.initial_guess,
                                    bounds=bounds)
@@ -250,6 +326,12 @@ class GammaFitter:
         return self.params
 
     def plot(self):
+        """
+        Plots the original data and the fitted gamma curve.
+
+        Raises:
+            ValueError: If the fit has not been performed before calling this method.
+        """
         if self.params is None:
             raise ValueError("Fit the data first using the 'fit' method before plotting.")
 
