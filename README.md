@@ -42,6 +42,7 @@ Ensure the following libraries are installed:
    pip install matplotlib
    
 ## **Installing libusb on Windows**
+**IMPORTANT**: This step requires visual studio with several [components](https://github.com/microsoft/vcpkg-tool/pull/314) installed. 
 1. Clone and bootstrap vcpkg:
     ```bash
    git clone https://github.com/microsoft/vcpkg.git
@@ -94,6 +95,7 @@ gl.close()
 ### **Steps to Calibrate Your Monitor** 
 1. **Install the libusb driver** as described above.
 2. **Connect the SpyderX device** to your computer.
+3. **Change the default driver to libusbK** using [Zadig](https://zadig.akeo.ie/)
 3. **Run the script**:
 
    - Perform black calibration by covering the SpyderX sensor.
@@ -130,5 +132,10 @@ gl.close()
 
     - Repeating measurements multiple times and averaging the gamma value improves accuracy.
 
+## **Troubleshooting**
+
+   - If the system installs DataColor Driver remove them completely using [RAPR](https://github.com/lostindark/DriverStoreExplorer?tab=readme-ov-file) 
+   - Then install libusbK using Zadig
+
 ## **Credits**
- - The SpyderX class was adapted from the work of [patrickmineault](https://github.com/patrickmineault/spyderX).
+ - The SpyderX class was adapted from the work (for macOS) of [patrickmineault](https://github.com/patrickmineault/spyderX).

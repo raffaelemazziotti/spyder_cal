@@ -25,7 +25,6 @@ class GrayLevels:
                             Defaults to False.
         """
         self.spyder = spyder
-        self.spyder.initialize()
         self.win = visual.Window([800, 600], color=[0, 0, 0], units="norm", waitBlanking=True, fullscr=fullscr)
         self.bg_rect = visual.Rect(self.win, width=2, height=2, fillColor=[0, 0, 0], lineColor=None)
         self.bg_rect.draw()

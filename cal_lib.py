@@ -11,216 +11,183 @@ from scipy.optimize import curve_fit
 # to run this code on windows10 [other OS not tested] you have to install the usblib drivers
 # git clone https://github.com/microsoft/vcpkg.git
 # cd vcpkg
-# bootstrap-vcpkg.bat
+# bootstrap-vcpkg.bat # (Visual Studio required)
 # vcpkg install libusb
-# then the library is located in ...\vcpkg\installed\x64-windows\bin\libusb-1.0.dll
-
+# then the library is located in ...\vcpkg\installed\x64-windows\bin\lib usb-1.0.dll
+# IMPORTANT if the device is not found (or you see reading timeout) it's possibly is because the system loaded the wrong driver you should change the default driver with libusbK (if you previously isntalled the official DataColor drivers you have to remove it using https://github.com/lostindark/DriverStoreExplorer?tab=readme-ov-file)
 
 class SpyderX:
     """
-    A class to interface with the SpyderX colorimeter for monitor calibration.
-
-    This class provides methods for initializing the SpyderX device, performing black calibration,
-    measuring luminance values, and extracting factory calibration data. The SpyderX communicates
-    through USB, requiring `libusb` as the backend.
-
-    Attributes:
-        dev (usb.core.Device): The USB device representing the SpyderX.
-        spyderData (dict): A dictionary storing SpyderX calibration and measurement data.
-        backend (usb.backend): The USB backend used for communication.
-        Code freely modified from: https://github.com/patrickmineault/spyderX
+    SpyderX colorimeter class for Windows using PyUSB + libusbK driver.
     """
 
     def __init__(self, libusb_path):
         """
-        Initializes the SpyderX class.
+        Initialize the SpyderX device.
 
         Args:
-            libusb_path (str): Full path to the `libusb-1.0.dll` file for Windows.
+            libusb_path (str): Full path to libusb-1.0.dll, for example:
+                               r'C:\\vcpkg\\installed\\x64-windows\\bin\\libusb-1.0.dll'
         """
-        self.dev = None
-        self.spyderData = {}
+        # Load the specified libusb-1.0.dll
         self.backend = usb.backend.libusb1.get_backend(find_library=lambda x: libusb_path)
         if self.backend is None:
-            raise ValueError("Libusb backend not found. Check if the path is correct.")
+            raise RuntimeError(f"Could not load libusb from: {libusb_path}")
 
-    def initialize(self):
-        """
-        Initializes the SpyderX device and performs initial USB setup.
+        # Find SpyderX device on the bus
+        self.dev = usb.core.find(idVendor=0x085C, idProduct=0x0A00, backend=self.backend)
+        if self.dev is None:
+            raise ValueError("SpyderX device not found. Check if it's plugged in and using libusbK driver via Zadig.")
 
-        Returns:
-            bool: True if the device was successfully initialized, False otherwise.
-        """
+        # Attempt to set configuration
         try:
-            self.dev = usb.core.find(idVendor=0x085C, idProduct=0x0A00, backend=self.backend)
-            if self.dev is None:
-                print("SpyderX device not found. Is it plugged in?")
-                return False
+            self.dev.set_configuration()
+        except usb.core.USBError:
+            pass  # Often already set
 
-            # Set USB configuration
-            try:
-                self.dev.set_configuration()
-            except NotImplementedError:
-                print("Set configuration not supported on this platform.")
-            except usb.core.USBError as e:
-                print(f"Error setting configuration: {e}")
-
-            # Claim USB interface
-            try:
-                if self.dev.is_kernel_driver_active(0):
-                    self.dev.detach_kernel_driver(0)
-                usb.util.claim_interface(self.dev, 0)
-            except NotImplementedError:
-                print("Claim interface not supported on this platform.")
-            except usb.core.USBError as e:
-                print(f"Error claiming interface: {e}")
-
-            # Perform setup transfers
-            self._control_transfer(0x02, 1, 0, 1, None)
-            self._control_transfer(0x02, 1, 0, 129, None)
-            self._control_transfer(0x41, 2, 2, 0, None)
-
-            # Retrieve hardware and calibration data
-            self._get_hardware_version()
-            self._get_serial_number()
-            self._get_factory_calibration()
-            self._get_amb_measure()
-            self._setup_measurement()
-
-            self.spyderData['isOpen'] = True
-            return True
-        except usb.core.USBError as e:
-            print(f"USB error occurred: {str(e)}")
-            return False
-
-    def _control_transfer(self, bmRequestType, bRequest, wValue, wIndex, data_or_wLength):
-        """
-        Performs a USB control transfer.
-
-        Args:
-            bmRequestType (int): The request type.
-            bRequest (int): The specific request.
-            wValue (int): Value parameter for the request.
-            wIndex (int): Index parameter for the request.
-            data_or_wLength (int or None): Data length or None.
-
-        Returns:
-            int or None: Result of the control transfer.
-        """
+        # Detach kernel driver if active (uncommon on Windows, but safe to try)
         try:
-            return self.dev.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, data_or_wLength)
-        except NotImplementedError:
-            print("Control transfer not supported on this platform.")
-            return None
+            if self.dev.is_kernel_driver_active(0):
+                self.dev.detach_kernel_driver(0)
+        except (NotImplementedError, usb.core.USBError):
+            pass
 
-    def _bulk_transfer(self, cmd, outSize):
-        """
-        Performs a USB bulk transfer for sending commands and reading data.
+        # Claim interface
+        usb.util.claim_interface(self.dev, 0)
 
-        Args:
-            cmd (list): List of bytes to send as a command.
-            outSize (int): Number of bytes to read as a response.
+        # Initialize the device (control transfers, then get calibration data)
+        self._initialize_device()
 
-        Returns:
-            numpy.ndarray: The response data read from the device.
+    def _initialize_device(self):
         """
-        try:
-            self.dev.write(1, cmd)
-            return self.dev.read(0x81, outSize)
-        except NotImplementedError:
-            print("Bulk transfer not supported on this platform.")
-            return None
+        Send the standard control transfers, then retrieve factory calibration and measurement setup.
+        """
+        # Standard set of control transfers to 'wake' the SpyderX
+        self._ctrl(0x02, 1, 0, 1)
+        self._ctrl(0x02, 1, 0, 129)
+        self._ctrl(0x41, 2, 2, 0)
 
-    def _get_hardware_version(self):
-        """
-        Retrieves the hardware version of the SpyderX device.
-        """
-        out = self._bulk_transfer([0xd9, 0x42, 0x33, 0x00, 0x00], 28)
-        if out is not None:
-            self.spyderData['HWvn'] = out[5:9].tobytes().decode()
+        # Retrieve factory calibration (matrix, v1, v2, etc.)
+        self._get_calibration()
+        # Retrieve measurement setup values (s1, s2, s3)
+        self._setup_measurement()
 
-    def _get_serial_number(self):
+    def _ctrl(self, bmRequestType, bRequest, wValue, wIndex):
         """
-        Retrieves the serial number of the SpyderX device.
+        Helper for control transfers.
         """
-        out = self._bulk_transfer([0xc2, 0x5c, 0x37, 0x00, 0x00], 42)
-        if out is not None:
-            self.spyderData['serNo'] = out[9:17].tobytes().decode()
+        self.dev.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, None)
 
-    def _get_factory_calibration(self):
+    def _bulk(self, data, read_size, timeout=1000):
         """
-        Retrieves the factory calibration data, including the calibration matrix.
+        Helper for bulk transfers. Writes 'data' to endpoint 1, reads 'read_size' bytes from endpoint 0x81.
         """
-        out = self._bulk_transfer([0xcb, 0x05, 0x73, 0x00, 0x01, 0x00], 47)
-        if out is not None:
-            out = out[5:]
-            matrix = np.zeros((3, 3))
-            for i in range(3):
-                for j in range(3):
-                    k = i * 3 + j
-                    matrix[i, j] = self._read_IEEE754(out[k * 4 + 4:k * 4 + 8])
-            self.spyderData['calibration'] = {'matrix': matrix}
+        self.dev.write(1, data, timeout=timeout)
+        return self.dev.read(0x81, read_size, timeout=timeout)
 
-    @staticmethod
-    def _read_nORD_be(input_bytes):
+    def _read_ieee754(self, b):
         """
-        Reads a big-endian integer from bytes.
-
-        Args:
-            input_bytes (bytes): Input bytes.
-
-        Returns:
-            int: Big-endian integer value.
+        Decode a 32-bit IEEE-754 float from 4 bytes in 'b'.
+        The SpyderX data is little-endian, so we reverse and parse.
         """
-        return int.from_bytes(input_bytes, byteorder='big')
+        b = b[::-1]
+        raw = int.from_bytes(b, "big")
+        sign = (raw >> 31) & 1
+        exponent = (raw >> 23) & 0xFF
+        fraction = raw & 0x7FFFFF
+        return (-1) ** sign * (1 + fraction / 2**23) * 2**(exponent - 127)
 
-    @staticmethod
-    def _read_IEEE754(input_bytes):
+    def _get_calibration(self):
         """
-        Decodes an IEEE-754 floating-point value from bytes.
-
-        Args:
-            input_bytes (bytes): Input bytes in little-endian format.
-
-        Returns:
-            float: The decoded floating-point value.
+        Retrieve factory calibration data, storing:
+          - v1, v2: calibration parameters
+          - calibration_matrix: 3x3 for XYZ computation
         """
-        input_bytes = input_bytes[::-1]
-        binary = ''.join(f'{byte:08b}' for byte in input_bytes)
-        sign = int(binary[0])
-        exponent = int(binary[1:9], 2)
-        fraction = int(binary[9:], 2) / 2 ** 23
-        return (-1) ** sign * (1 + fraction) * 2 ** (exponent - 127)
+        # Command 0xcb for factory calibration, read 47 bytes
+        out = self._bulk([0xcb, 0x05, 0x73, 0x00, 0x01, 0x00], 47)[5:]
+        self.v1 = out[1]
+        self.v2 = int.from_bytes(out[2:4], 'big')
+
+        # Build the 3x3 matrix
+        matrix = np.zeros((3, 3))
+        for i in range(3):
+            for j in range(3):
+                k = i*3 + j
+                matrix[i, j] = self._read_ieee754(out[k*4 + 4 : k*4 + 8])
+
+        self.calibration_matrix = matrix
+
+    def _setup_measurement(self):
+        """
+        Retrieve s1, s2, s3 from the device, used in calibrate() and measure() calls.
+        """
+        # 0xc3 sets up measurement for the device
+        payload = [0xc3, 0x29, 0x27, 0x00, 0x01, self.v1]
+        out = self._bulk(payload, 15)
+
+        self.s1 = out[5]
+        self.s2 = out[6:10]
+        self.s3 = out[10:14]
 
     def calibrate(self):
         """
-        Performs black-level calibration of the SpyderX device.
+        Perform black (dark) calibration.
+        The user should cover the SpyderX lens before calling this.
         """
-        if not self.spyderData.get('isOpen', False):
-            self.initialize()
-        self._control_transfer(0x41, 2, 2, 0, None)
+        # Standard control transfer first
+        self._ctrl(0x41, 2, 2, 0)
+
+        # build payload from v2, s1, s2
+        payload = [self.v2 >> 8, self.v2 & 0xFF, self.s1] + list(self.s2)
+        out = self._bulk([0xd2, 0x3f, 0xb9, 0x00, 0x07] + payload, 13)
+
+        # parse the black calibration data
+        raw = struct.unpack('>HHHH', out[5:])
+        self.black_cal = np.array(raw[:3])
 
     def measure(self):
         """
-        Measures the luminance and color values from the monitor.
-
-        Returns:
-            numpy.ndarray: The measured XYZ color values, where Y is luminance.
+        Perform a measurement, returning XYZ as a numpy array [X, Y, Z].
+        Y is luminance in cd/m².
         """
-        self._control_transfer(0x41, 2, 2, 0, None)
-        out = self._bulk_transfer([0xd2, 0x3f, 0xb9, 0x00, 0x07], 13)
-        if out is not None:
-            raw = np.array(struct.unpack('>HHHH', out[5:]))
-            XYZ = np.dot(raw[:3], self.spyderData['calibration']['matrix'])
-            return XYZ
+        # Control transfer
+        self._ctrl(0x41, 2, 2, 0)
+
+        # build measurement payload
+        payload = [self.v2 >> 8, self.v2 & 0xFF, self.s1] + list(self.s2)
+        out = self._bulk([0xd2, 0x3f, 0xb9, 0x00, 0x07] + payload, 13)
+
+        raw = np.array(struct.unpack('>HHHH', out[5:]))[:3]
+        corrected = raw - self.black_cal
+        xyz = np.dot(corrected, self.calibration_matrix)
+        return xyz
+
+    def get_luminance(self):
+        """
+        Return just the Y (luminance) component in cd/m².
+        """
+        return self.measure()[1]
+
+    def get_rgb_luminance(self):
+        """
+        Convert measured XYZ to approximate linear RGB intensities.
+        Useful for relative channel brightness checks.
+        """
+        xyz = self.measure()
+        xyz_to_rgb = np.array([
+            [ 3.2406, -1.5372, -0.4986],
+            [-0.9689,  1.8758,  0.0415],
+            [ 0.0557, -0.2040,  1.0570]
+        ])
+        rgb = np.dot(xyz_to_rgb, xyz)
+        return tuple(rgb)
 
     def close(self):
         """
-        Releases the USB resources and closes the connection to the SpyderX device.
+        Release the interface and USB resources.
         """
-        if self.dev:
-            usb.util.dispose_resources(self.dev)
-        self.spyderData['isOpen'] = False
+        usb.util.release_interface(self.dev, 0)
+        usb.util.dispose_resources(self.dev)
 
 def xyz_to_lms(xyz):
     # XYZ to LMS conversion matrix (Hunt-Pointer-Estevez)
@@ -362,21 +329,16 @@ class GammaFitter:
 if __name__=='__main__':
     spyder = SpyderX(r"C:\cancellami\vcpkg\installed\x64-windows\bin\libusb-1.0.dll")
     try:
-        print("Initializing SpyderX...")
-        if spyder.initialize():
-            print("Performing Dark calibration...")
-            spyder.calibrate()
-            print("Starting measurements...")
-            while True:
-                xyz = spyder.measure()
-                lms = xyz_to_lms(xyz)
-                print(f"XYZ values: {xyz}")
-                print(f"LMS values: {lms}")
-                time.sleep(2)
-        else:
-            print("Failed to initialize SpyderX. Please check the connection and try again.")
-    except KeyboardInterrupt:
-        print("\nMeasurement stopped by user.")
+        print("Performing Dark calibration...")
+        spyder.calibrate()
+        print("Starting measurements...")
+        while True:
+            xyz = spyder.measure()
+            lms = xyz_to_lms(xyz)
+            print(f"XYZ values: {xyz}")
+            print(f"LMS values: {lms}")
+            time.sleep(2)
+
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         raise e
