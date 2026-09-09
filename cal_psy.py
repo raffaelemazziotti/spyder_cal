@@ -15,7 +15,7 @@ class GrayLevels:
         bg_rect (psychopy.visual.Rect): A full-screen rectangle used to simulate background color.
     """
 
-    def __init__(self, spyder, fullscr=False):
+    def __init__(self, spyder, fullscr=False, screen=0):
         """
         Initializes the GrayLevels class.
 
@@ -23,6 +23,7 @@ class GrayLevels:
             spyder (SpyderX): An initialized SpyderX object for luminance measurements.
             fullscr (bool): Whether to open the PsychoPy window in full-screen mode.
                             Defaults to False.
+            screen (int) The screen you want to use. Defaults to 0.
         """
         self.spyder = spyder
         self.win = visual.Window([800, 600], color=[0, 0, 0], units="norm", waitBlanking=True, fullscr=fullscr)

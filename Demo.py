@@ -1,9 +1,10 @@
 from cal_lib import SpyderX
 from cal_psy import GrayLevels
+import numpy as np
 
 
 libusb_path = r"C:\cancellami\vcpkg\installed\x64-windows\bin\libusb-1.0.dll"  # Replace with actual path
-spyder = SpyderX(libusb_path)
+spyder = SpyderX(libusb_path,screen=2)
 gl = GrayLevels(spyder)
 gl.calibrate()
 gammas = list()
