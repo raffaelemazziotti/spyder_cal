@@ -15,7 +15,7 @@ class GrayLevels:
         bg_rect (psychopy.visual.Rect): A full-screen rectangle used to simulate background color.
     """
 
-    def __init__(self, spyder, fullscr=False, screen=0):
+    def __init__(self, spyder, fullscr=False, screen=0, size=(800, 600), pos=None):
         """
         Initializes the GrayLevels class.
 
@@ -23,10 +23,21 @@ class GrayLevels:
             spyder (SpyderX): An initialized SpyderX object for luminance measurements.
             fullscr (bool): Whether to open the PsychoPy window in full-screen mode.
                             Defaults to False.
-            screen (int) The screen you want to use. Defaults to 0.
+            screen (int): The display to use. Defaults to 0.
+            size (tuple): Window size in pixels. Defaults to (800, 600).
+            pos (tuple, optional): Window position in pixels. PsychoPy chooses
+                                   the position when omitted.
         """
         self.spyder = spyder
-        self.win = visual.Window([800, 600], color=[0, 0, 0], units="norm", waitBlanking=True, fullscr=fullscr)
+        self.win = visual.Window(
+            size=size,
+            pos=pos,
+            color=[0, 0, 0],
+            units="norm",
+            waitBlanking=True,
+            fullscr=fullscr,
+            screen=screen,
+        )
         self.bg_rect = visual.Rect(self.win, width=2, height=2, fillColor=[0, 0, 0], lineColor=None)
         self.bg_rect.draw()
 
@@ -60,7 +71,7 @@ class GrayLevels:
             pause (float): The time (in seconds) to pause after each gray level display to ensure stabilization.
                            Defaults to 1 second.
             gamma (float, optional): A predefined gamma value to set for the monitor (for testing the linearity of the monitor after correction). If None, gamma remains unchanged.
-                                     Defaults to None. This parameter works on Windows only with one monitor or in mirror mode.
+                                     Defaults to None. Support depends on the PsychoPy display backend and operating system.
             num_levels (int): The number of gray levels to display and measure. Defaults to 12.
             wait_user (bool): wait for keypress to start
 
@@ -118,16 +129,17 @@ class GrayLevels:
 
 if __name__ == '__main__':
     from cal_lib import SpyderX
-    libusb_path = r"C:\cancellami\vcpkg\installed\x64-windows\bin\libusb-1.0.dll"  # Replace with actual path
-    spyder = SpyderX(libusb_path)
-    gl = GrayLevels(spyder)
-    gl.calibrate()
-    gammas = list()
-    gfit = gl.measure(num_levels=12)
-    gammas.append(gfit.gamma)
-    for i in range(0,3):
-        gfit = gl.measure(num_levels=12,wait_user=False)
-        gammas.append(gfit.gamma)
-    #gl.measure(gamma=np.mean(gammas),num_levels=12,wait_user=False)
-    gl.close()
+    with SpyderX() as spyder:
+        gl = GrayLevels(spyder)
+        try:
+            gl.calibrate()
+            gammas = list()
+            gfit = gl.measure(num_levels=12)
+            gammas.append(gfit.gamma)
+            for i in range(0, 3):
+                gfit = gl.measure(num_levels=12, wait_user=False)
+                gammas.append(gfit.gamma)
+            # gl.measure(gamma=np.mean(gammas), num_levels=12, wait_user=False)
+        finally:
+            gl.close()
     print(f'Display Gamma avg: {np.mean(gammas)}')

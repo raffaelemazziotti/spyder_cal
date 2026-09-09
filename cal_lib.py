@@ -4,59 +4,95 @@ import usb.backend.libusb1
 import numpy as np
 import struct
 import time
-import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-# to run this code on windows10 [other OS not tested] you have to install the usblib drivers
-# git clone https://github.com/microsoft/vcpkg.git
-# cd vcpkg
-# bootstrap-vcpkg.bat # (Visual Studio required)
-# vcpkg install libusb
-# then the library is located in ...\vcpkg\installed\x64-windows\bin\lib usb-1.0.dll
-# IMPORTANT if the device is not found (or you see reading timeout) it's possibly is because the system loaded the wrong driver you should change the default driver with libusbK (if you previously isntalled the official DataColor drivers you have to remove it using https://github.com/lostindark/DriverStoreExplorer?tab=readme-ov-file)
-
 class SpyderX:
     """
-    SpyderX colorimeter class for Windows using PyUSB + libusbK driver.
+    SpyderX colorimeter using PyUSB and a libusb 1.x backend.
     """
 
-    def __init__(self, libusb_path):
+    INTERFACE = 0
+    VENDOR_ID = 0x085C
+    PRODUCT_ID = 0x0A00
+
+    def __init__(self, libusb_path=None):
         """
         Initialize the SpyderX device.
 
         Args:
-            libusb_path (str): Full path to libusb-1.0.dll, for example:
-                               r'C:\\vcpkg\\installed\\x64-windows\\bin\\libusb-1.0.dll'
+            libusb_path (str, optional): Explicit path to a libusb 1.x shared
+                library. This preserves the existing Windows DLL workflow. If
+                omitted, PyUSB discovers the system libusb automatically.
         """
-        # Load the specified libusb-1.0.dll
-        self.backend = usb.backend.libusb1.get_backend(find_library=lambda x: libusb_path)
+        self.backend = None
+        self.dev = None
+        self._interface_claimed = False
+        self._detached_kernel_driver = False
+        self._closed = False
+
+        if libusb_path is None:
+            self.backend = usb.backend.libusb1.get_backend()
+        else:
+            self.backend = usb.backend.libusb1.get_backend(
+                find_library=lambda _name: libusb_path
+            )
+
         if self.backend is None:
-            raise RuntimeError(f"Could not load libusb from: {libusb_path}")
+            if libusb_path is None:
+                raise RuntimeError(
+                    "PyUSB could not find a libusb 1.x backend. Install libusb-1.0 "
+                    "and make it discoverable by the operating system, or pass "
+                    "libusb_path explicitly."
+                )
+            raise RuntimeError(
+                f"PyUSB could not load the libusb 1.x library at: {libusb_path}"
+            )
 
         # Find SpyderX device on the bus
-        self.dev = usb.core.find(idVendor=0x085C, idProduct=0x0A00, backend=self.backend)
+        self.dev = usb.core.find(
+            idVendor=self.VENDOR_ID,
+            idProduct=self.PRODUCT_ID,
+            backend=self.backend,
+        )
         if self.dev is None:
-            raise ValueError("SpyderX device not found. Check if it's plugged in and using libusbK driver via Zadig.")
+            raise ValueError(
+                "SpyderX device (USB 085c:0a00) not found. Check that it is "
+                "connected, that your user has USB permission, and on Windows "
+                "that a libusb-compatible driver is installed."
+            )
 
-        # Attempt to set configuration
         try:
-            self.dev.set_configuration()
-        except usb.core.USBError:
-            pass  # Often already set
+            # An already configured device can reject this harmlessly.
+            try:
+                self.dev.set_configuration()
+            except usb.core.USBError:
+                pass
 
-        # Detach kernel driver if active (uncommon on Windows, but safe to try)
+            self._detach_kernel_driver_if_needed()
+            usb.util.claim_interface(self.dev, self.INTERFACE)
+            self._interface_claimed = True
+
+            # Initialize the device (control transfers, then get calibration data)
+            self._initialize_device()
+        except Exception:
+            self.close()
+            raise
+
+    def _detach_kernel_driver_if_needed(self):
+        """Detach an active kernel driver when the backend supports doing so."""
+        is_active = getattr(self.dev, "is_kernel_driver_active", None)
+        detach = getattr(self.dev, "detach_kernel_driver", None)
+        if not callable(is_active) or not callable(detach):
+            return
+
         try:
-            if self.dev.is_kernel_driver_active(0):
-                self.dev.detach_kernel_driver(0)
+            if is_active(self.INTERFACE):
+                detach(self.INTERFACE)
+                self._detached_kernel_driver = True
         except (NotImplementedError, usb.core.USBError):
+            # Windows and some libusb backends do not implement these methods.
             pass
-
-        # Claim interface
-        usb.util.claim_interface(self.dev, 0)
-
-        # Initialize the device (control transfers, then get calibration data)
-        self._initialize_device()
 
     def _initialize_device(self):
         """
@@ -184,10 +220,45 @@ class SpyderX:
 
     def close(self):
         """
-        Release the interface and USB resources.
+        Release the interface, restore its kernel driver, and dispose resources.
+
+        This method is idempotent and safe after partially failed initialization.
         """
-        usb.util.release_interface(self.dev, 0)
-        usb.util.dispose_resources(self.dev)
+        if self._closed:
+            return
+        self._closed = True
+
+        if self.dev is None:
+            return
+
+        if self._interface_claimed:
+            try:
+                usb.util.release_interface(self.dev, self.INTERFACE)
+            except usb.core.USBError:
+                pass
+            finally:
+                self._interface_claimed = False
+
+        if self._detached_kernel_driver:
+            attach = getattr(self.dev, "attach_kernel_driver", None)
+            if callable(attach):
+                try:
+                    attach(self.INTERFACE)
+                except (NotImplementedError, usb.core.USBError):
+                    pass
+            self._detached_kernel_driver = False
+
+        try:
+            usb.util.dispose_resources(self.dev)
+        except usb.core.USBError:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
 
 def xyz_to_lms(xyz):
     # XYZ to LMS conversion matrix (Hunt-Pointer-Estevez)
@@ -326,9 +397,9 @@ class GammaFitter:
         plt.grid()
         plt.show()
 
-if __name__=='__main__':
-    spyder = SpyderX(r"C:\cancellami\vcpkg\installed\x64-windows\bin\libusb-1.0.dll")
+if __name__ == '__main__':
     try:
+        spyder = SpyderX()
         print("Performing Dark calibration...")
         spyder.calibrate()
         print("Starting measurements...")
@@ -341,7 +412,8 @@ if __name__=='__main__':
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
-        raise e
+        raise
     finally:
-        spyder.close()
-        print("SpyderX closed.")
+        if "spyder" in locals():
+            spyder.close()
+            print("SpyderX closed.")

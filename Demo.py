@@ -3,16 +3,19 @@ from cal_psy import GrayLevels
 import numpy as np
 
 
-libusb_path = r"C:\cancellami\vcpkg\installed\x64-windows\bin\libusb-1.0.dll"  # Replace with actual path
-spyder = SpyderX(libusb_path,screen=2)
-gl = GrayLevels(spyder)
-gl.calibrate()
-gammas = list()
-gfit = gl.measure(num_levels=12)
-gammas.append(gfit.gamma)
-for i in range(0,3):
-    gfit = gl.measure(num_levels=12,wait_user=False)
-    gammas.append(gfit.gamma)
-#gl.measure(gamma=np.mean(gammas),num_levels=12,wait_user=False)
-gl.close()
+with SpyderX() as spyder:
+    # On Windows, an explicit DLL remains supported:
+    # SpyderX(libusb_path=r"C:\path\to\libusb-1.0.dll")
+    gl = GrayLevels(spyder, size=(800, 600), screen=0, fullscr=False)
+    try:
+        gl.calibrate()
+        gammas = list()
+        gfit = gl.measure(num_levels=12)
+        gammas.append(gfit.gamma)
+        for i in range(0, 3):
+            gfit = gl.measure(num_levels=12, wait_user=False)
+            gammas.append(gfit.gamma)
+        # gl.measure(gamma=np.mean(gammas), num_levels=12, wait_user=False)
+    finally:
+        gl.close()
 print(f'Display Gamma avg: {np.mean(gammas)}')
