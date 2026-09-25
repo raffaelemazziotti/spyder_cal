@@ -1,8 +1,4 @@
-"""Machine-specific calibration routine for the Linux stimulus computer.
-
-This is not the generic cross-platform example. Its unusual negative PsychoPy
-window position is intentional and validated for this computer's X11 layout.
-"""
+"""Calibration routine for this computer's single-monitor Linux setup."""
 
 import argparse
 import json
@@ -25,13 +21,10 @@ from matplotlib import pyplot as plt
 from cal_lib import GammaFitter, SpyderX
 
 
-STIMULUS_CONNECTOR = "DVI-I-1"
-CONTROL_CONNECTOR = "DP-1"
-STIMULUS_SIZE = (1280, 720)
+STIMULUS_CONNECTOR = "HDMI-1-2"
+STIMULUS_SCREEN = 0
+STIMULUS_SIZE = (1920, 1080)
 STIMULUS_DESKTOP_POSITION = (0, 0)
-CONTROL_SIZE = (1024, 768)
-CONTROL_DESKTOP_POSITION = (1280, 0)
-PSYCHOPY_POSITION = (-1280, 0)
 DEFAULT_OUTPUT = Path("calibration_results/stimulator_calibration.json")
 DEFAULT_RUNTIME_OUTPUT = Path("calibration_results/stimulator_gamma.json")
 DEFAULT_PLOT_OUTPUT = Path("calibration_results/stimulator_calibration.png")
@@ -49,7 +42,7 @@ def defer_fit_plot():
 
 
 def create_stimulator_gray_levels(spyder):
-    """Create a GrayLevels adapter with the validated local window geometry."""
+    """Create a fullscreen GrayLevels adapter on the only connected monitor."""
     from psychopy import visual
     from cal_psy import GrayLevels
 
@@ -58,8 +51,8 @@ def create_stimulator_gray_levels(spyder):
             self.spyder = spyder_device
             self.win = visual.Window(
                 size=STIMULUS_SIZE,
-                pos=PSYCHOPY_POSITION,
-                fullscr=False,
+                screen=STIMULUS_SCREEN,
+                fullscr=True,
                 allowGUI=False,
                 waitBlanking=True,
                 color=[0, 0, 0],
@@ -86,8 +79,8 @@ def positive_int(value):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--width-cm", type=float, default=21)
-    parser.add_argument("--height-cm", type=float, default=15)
+    parser.add_argument("--width-cm", type=float, default=34.4)
+    parser.add_argument("--height-cm", type=float, default=19.3)
     parser.add_argument("--viewing-distance-cm", type=float, default=10)
     parser.add_argument("--num-levels", type=int, default=12)
     parser.add_argument("--pause", type=float, default=1)
@@ -106,10 +99,31 @@ def summarize_gammas(fits):
     return gamma_values, fmean(gamma_values), std_gamma
 
 
-def save_calibration(path, fits, mean_gamma, std_gamma, args):
+def summarize_luminance(fits):
+    """Summarize the measured black and white luminance across repetitions."""
+    luminance_by_repetition = [
+        np.asarray(fit.original_luminance.tolist(), dtype=float)
+        for fit in fits
+    ]
+    minimum_values = [float(np.min(values)) for values in luminance_by_repetition]
+    maximum_values = [float(np.max(values)) for values in luminance_by_repetition]
+    std_minimum = stdev(minimum_values) if len(minimum_values) > 1 else 0.0
+    std_maximum = stdev(maximum_values) if len(maximum_values) > 1 else 0.0
+    return {
+        "unit": "cd/m^2",
+        "minimum_by_repetition": minimum_values,
+        "maximum_by_repetition": maximum_values,
+        "mean_minimum": fmean(minimum_values),
+        "mean_maximum": fmean(maximum_values),
+        "std_minimum": std_minimum,
+        "std_maximum": std_maximum,
+    }
+
+
+def save_calibration(path, fits, mean_gamma, std_gamma, luminance_summary, args):
     """Atomically save every run returned by GrayLevels/GammaFitter."""
     result = {
-        "format_version": 1,
+        "format_version": 2,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "repetitions": len(fits),
         "runs": [
@@ -124,21 +138,16 @@ def save_calibration(path, fits, mean_gamma, std_gamma, args):
         ],
         "mean_gamma": mean_gamma,
         "std_gamma": std_gamma,
+        "luminance_summary": luminance_summary,
         "display": {
             "stimulus": {
                 "connector": STIMULUS_CONNECTOR,
+                "screen": STIMULUS_SCREEN,
                 "resolution_px": list(STIMULUS_SIZE),
                 "desktop_position_px": list(STIMULUS_DESKTOP_POSITION),
-                "psychopy_position_px": list(PSYCHOPY_POSITION),
-                "fullscr": False,
+                "fullscr": True,
                 "allow_gui": False,
                 "wait_blanking": True,
-            },
-            "control": {
-                "connector": CONTROL_CONNECTOR,
-                "resolution_px": list(CONTROL_SIZE),
-                "desktop_position_px": list(CONTROL_DESKTOP_POSITION),
-                "primary": True,
             },
         },
         "physical_geometry": {
@@ -156,11 +165,16 @@ def save_calibration(path, fits, mean_gamma, std_gamma, args):
     return output_path
 
 
-def save_runtime_calibration(path, mean_gamma):
-    """Atomically save the exact scalar-gamma schema used by the stimulator."""
+def save_runtime_calibration(path, mean_gamma, luminance_summary):
+    """Save gamma and the measured luminance range used by the stimulator."""
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "gamma": mean_gamma,
+        "luminance": {
+            "unit": luminance_summary["unit"],
+            "minimum": luminance_summary["mean_minimum"],
+            "maximum": luminance_summary["mean_maximum"],
+        },
     }
     output_path = path.expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,16 +287,19 @@ def run_repetitions(levels, repetitions, pause, num_levels):
 
 def save_and_display_results(args, fits, mean_gamma, std_gamma):
     """Save both JSON files before optional plot and viewer operations."""
+    luminance_summary = summarize_luminance(fits)
     output_path = save_calibration(
         args.output,
         fits,
         mean_gamma,
         std_gamma,
+        luminance_summary,
         args,
     )
     runtime_output_path = save_runtime_calibration(
         args.runtime_output,
         mean_gamma,
+        luminance_summary,
     )
     plot_path = save_fit_plot_safely(args.plot_output, fits, mean_gamma)
     if plot_path is not None:
@@ -298,7 +315,7 @@ def main():
         levels = create_stimulator_gray_levels(spyder)
         print(
             f"Stimulus monitor opened: {STIMULUS_CONNECTOR}, "
-            f"size={STIMULUS_SIZE}, pos={PSYCHOPY_POSITION}."
+            f"screen={STIMULUS_SCREEN}, size={STIMULUS_SIZE}, fullscreen."
         )
         try:
             levels.calibrate()
@@ -309,11 +326,9 @@ def main():
                 num_levels=args.num_levels,
             )
             gamma_values, mean_gamma, std_gamma = summarize_gammas(fits)
+            luminance_summary = summarize_luminance(fits)
             output_path, runtime_output_path, plot_path = save_and_display_results(
-                args,
-                fits,
-                mean_gamma,
-                std_gamma,
+                args, fits, mean_gamma, std_gamma
             )
         finally:
             levels.close()
@@ -322,8 +337,14 @@ def main():
     print("Gamma repetitions: " + ", ".join(f"{value:.6f}" for value in gamma_values))
     print(f"Mean gamma: {mean_gamma:.6f}")
     print(f"Gamma SD: {std_gamma:.6f}")
+    print(
+        "Mean luminance range: "
+        f"{luminance_summary['mean_minimum']:.6f} to "
+        f"{luminance_summary['mean_maximum']:.6f} "
+        f"{luminance_summary['unit']}"
+    )
     print(f"Full calibration saved: {output_path}")
-    print(f"Stimulator gamma saved: {runtime_output_path}")
+    print(f"Stimulator runtime calibration saved: {runtime_output_path}")
     if plot_path is None:
         print("Plot saved: unavailable (see warning above)")
     else:

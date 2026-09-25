@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "gamma": 2.1608854750067703,
+  "luminance": {
+    "unit": "cd/m^2",
+    "minimum": 0.18432463763747364,
+    "maximum": 158.45120194007177
+  }
+}

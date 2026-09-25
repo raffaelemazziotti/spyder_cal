@@ -1,11 +1,96 @@
 import usb.core
 import usb.util
 import usb.backend.libusb1
+import json
 import numpy as np
+import platform
 import struct
 import time
+from pathlib import Path
+from statistics import fmean, stdev
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+
+
+class GammaMeasurement:
+    """Result of one or more display-gamma measurement runs."""
+
+    def __init__(self, fits):
+        if not fits:
+            raise ValueError("at least one gamma fit is required")
+
+        self.runs = []
+        for index, fit in enumerate(fits, start=1):
+            gray_levels = np.asarray(fit.original_intensities, dtype=float)
+            luminance = np.asarray(fit.original_luminance, dtype=float)
+            self.runs.append(
+                {
+                    "repetition": index,
+                    "gamma": float(fit.gamma),
+                    "gray_levels": gray_levels.tolist(),
+                    "luminance": luminance.tolist(),
+                    "fit_parameters": np.asarray(fit.params, dtype=float).tolist(),
+                }
+            )
+
+        self.gamma_values = [run["gamma"] for run in self.runs]
+        self.gamma = fmean(self.gamma_values)
+        self.gamma_std = (
+            stdev(self.gamma_values) if len(self.gamma_values) > 1 else 0.0
+        )
+        self.luminance_min_values = [min(run["luminance"]) for run in self.runs]
+        self.luminance_max_values = [max(run["luminance"]) for run in self.runs]
+        self.luminance_min = fmean(self.luminance_min_values)
+        self.luminance_max = fmean(self.luminance_max_values)
+        self.luminance_min_std = (
+            stdev(self.luminance_min_values)
+            if len(self.luminance_min_values) > 1
+            else 0.0
+        )
+        self.luminance_max_std = (
+            stdev(self.luminance_max_values)
+            if len(self.luminance_max_values) > 1
+            else 0.0
+        )
+
+    def to_dict(self):
+        """Return a JSON-serializable calibration result."""
+        return {
+            "schema_version": 2,
+            "gamma": self.gamma,
+            "gamma_std": self.gamma_std,
+            "gamma_by_repetition": self.gamma_values,
+            "luminance": {
+                "unit": "cd/m^2",
+                "minimum": self.luminance_min,
+                "maximum": self.luminance_max,
+                "minimum_std": self.luminance_min_std,
+                "maximum_std": self.luminance_max_std,
+                "minimum_by_repetition": self.luminance_min_values,
+                "maximum_by_repetition": self.luminance_max_values,
+            },
+            "runs": self.runs,
+        }
+
+    def save_json(self, path):
+        """Atomically save this measurement and return its absolute path."""
+        output_path = Path(path).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+        temporary_path.write_text(
+            json.dumps(self.to_dict(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(output_path)
+        return output_path
+
+    def __str__(self):
+        return (
+            f"gamma={self.gamma:.4f} (SD {self.gamma_std:.4f}), "
+            f"luminance={self.luminance_min:.3f}–"
+            f"{self.luminance_max:.3f} cd/m²"
+        )
+
 
 class SpyderX:
     """
@@ -70,7 +155,16 @@ class SpyderX:
                 pass
 
             self._detach_kernel_driver_if_needed()
-            usb.util.claim_interface(self.dev, self.INTERFACE)
+            try:
+                usb.util.claim_interface(self.dev, self.INTERFACE)
+            except usb.core.USBError as error:
+                if platform.system() == "Linux" and getattr(error, "errno", None) == 13:
+                    raise PermissionError(
+                        "Linux denied access to SpyderX USB 085c:0a00. Install "
+                        "udev/60-spyderx.rules, reload udev rules, and unplug/"
+                        "reconnect the device. Do not run as root."
+                    ) from error
+                raise
             self._interface_claimed = True
 
             # Initialize the device (control transfers, then get calibration data)
@@ -217,6 +311,64 @@ class SpyderX:
         ])
         rgb = np.dot(xyz_to_rgb, xyz)
         return tuple(rgb)
+
+    def measure_gamma(
+        self,
+        repetitions=3,
+        num_levels=12,
+        pause=1,
+        fullscr=True,
+        screen=0,
+        size=None,
+        pos=None,
+        dark_calibration=True,
+    ):
+        """Interactively measure display gamma and luminance with PsychoPy.
+
+        PsychoPy is imported only when this method is called, so direct USB and
+        luminance measurements do not require it. A fullscreen window uses the
+        selected display's native resolution when ``size`` is omitted.
+        """
+        if repetitions < 1:
+            raise ValueError("repetitions must be at least 1")
+        if num_levels < 3:
+            raise ValueError("num_levels must be at least 3")
+        if pause < 0:
+            raise ValueError("pause must not be negative")
+
+        try:
+            from cal_psy import GrayLevels
+        except ImportError as error:
+            raise RuntimeError(
+                "Gamma measurement requires PsychoPy. Install the dependencies "
+                "from requirements.txt."
+            ) from error
+
+        levels = GrayLevels(
+            self,
+            fullscr=fullscr,
+            screen=screen,
+            size=size,
+            pos=pos,
+        )
+        try:
+            if dark_calibration:
+                levels.calibrate()
+
+            fits = []
+            for repetition in range(repetitions):
+                print(f"Gamma measurement {repetition + 1}/{repetitions}")
+                fits.append(
+                    levels.measure(
+                        pause=pause,
+                        num_levels=num_levels,
+                        wait_user=repetition == 0,
+                        plot=False,
+                    )
+                )
+            return GammaMeasurement(fits)
+        finally:
+            levels.close(close_spyder=False)
 
     def close(self):
         """

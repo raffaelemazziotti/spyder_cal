@@ -38,13 +38,13 @@ class StimulatorCalibrationTests(unittest.TestCase):
         fake_psychopy.visual.reset_mock()
         fake_psychopy.visual.Window.return_value = mock.Mock()
 
-    def test_uses_validated_stimulus_window_geometry(self):
+    def test_uses_single_monitor_fullscreen_geometry(self):
         calibration.create_stimulator_gray_levels(mock.Mock())
 
         fake_psychopy.visual.Window.assert_called_once_with(
-            size=(1280, 720),
-            pos=(-1280, 0),
-            fullscr=False,
+            size=(1920, 1080),
+            screen=0,
+            fullscr=True,
             allowGUI=False,
             waitBlanking=True,
             color=[0, 0, 0],
@@ -59,6 +59,7 @@ class StimulatorCalibrationTests(unittest.TestCase):
 
         self.assertEqual(args.repetitions, 3)
         self.assertEqual(args.runtime_output, calibration.DEFAULT_RUNTIME_OUTPUT)
+        self.assertEqual((args.width_cm, args.height_cm), (34.4, 19.3))
 
     def test_cli_repetitions(self):
         self.assertEqual(
@@ -98,6 +99,19 @@ class StimulatorCalibrationTests(unittest.TestCase):
 
         self.assertEqual(std_gamma, 0.0)
 
+    def test_luminance_summary_contains_minimum_and_maximum(self):
+        summary = calibration.summarize_luminance(
+            [make_fit(2.1, [0.1, 90.0]), make_fit(2.3, [0.3, 110.0])]
+        )
+
+        self.assertEqual(summary["unit"], "cd/m^2")
+        self.assertEqual(summary["minimum_by_repetition"], [0.1, 0.3])
+        self.assertEqual(summary["maximum_by_repetition"], [90.0, 110.0])
+        self.assertAlmostEqual(summary["mean_minimum"], 0.2)
+        self.assertEqual(summary["mean_maximum"], 100.0)
+        self.assertAlmostEqual(summary["std_minimum"], 0.1414213562373095)
+        self.assertAlmostEqual(summary["std_maximum"], 14.142135623730951)
+
     def test_failed_repetition_aborts_without_returning_partial_results(self):
         levels = mock.Mock()
         levels.measure.side_effect = [make_fit(2.1), RuntimeError("USB failed")]
@@ -119,10 +133,14 @@ class StimulatorCalibrationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "calibration.json"
-            saved_path = calibration.save_calibration(output, fits, 2.2, 0.1, args)
+            luminance_summary = calibration.summarize_luminance(fits)
+            saved_path = calibration.save_calibration(
+                output, fits, 2.2, 0.1, luminance_summary, args
+            )
             result = json.loads(saved_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result["repetitions"], 2)
+        self.assertEqual(result["format_version"], 2)
         self.assertEqual(len(result["runs"]), 2)
         self.assertEqual([run["gamma"] for run in result["runs"]], [2.1, 2.3])
         self.assertEqual(result["runs"][0]["gray_levels"], [-1.0, 1.0])
@@ -130,7 +148,11 @@ class StimulatorCalibrationTests(unittest.TestCase):
         self.assertEqual(result["runs"][1]["fit_parameters"], [1.0, 2.3, 0.0])
         self.assertEqual(result["mean_gamma"], 2.2)
         self.assertEqual(result["std_gamma"], 0.1)
-        self.assertEqual(result["display"]["stimulus"]["connector"], "DVI-I-1")
+        self.assertEqual(result["luminance_summary"], luminance_summary)
+        self.assertEqual(result["display"]["stimulus"]["connector"], "HDMI-1-2")
+        self.assertEqual(result["display"]["stimulus"]["screen"], 0)
+        self.assertTrue(result["display"]["stimulus"]["fullscr"])
+        self.assertNotIn("control", result["display"])
         self.assertEqual(result["physical_geometry"]["width_cm"], 21)
         self.assertEqual(
             set(result),
@@ -141,23 +163,34 @@ class StimulatorCalibrationTests(unittest.TestCase):
                 "runs",
                 "mean_gamma",
                 "std_gamma",
+                "luminance_summary",
                 "display",
                 "physical_geometry",
             },
         )
 
-    def test_runtime_json_contains_exact_mean_gamma_schema(self):
+    def test_runtime_json_contains_gamma_and_luminance_range(self):
         individual_gammas, mean_gamma, _ = calibration.summarize_gammas(
             [make_fit(2.1), make_fit(2.2), make_fit(2.4)]
+        )
+        luminance_summary = calibration.summarize_luminance(
+            [make_fit(2.1, [0.1, 90.0]), make_fit(2.2, [0.3, 110.0])]
         )
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "stimulator_gamma.json"
-            saved_path = calibration.save_runtime_calibration(output, mean_gamma)
+            saved_path = calibration.save_runtime_calibration(
+                output, mean_gamma, luminance_summary
+            )
             result = json.loads(saved_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(set(result), {"schema_version", "gamma"})
-        self.assertEqual(result, {"schema_version": 1, "gamma": mean_gamma})
+        self.assertEqual(set(result), {"schema_version", "gamma", "luminance"})
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["gamma"], mean_gamma)
+        self.assertEqual(
+            result["luminance"],
+            {"unit": "cd/m^2", "minimum": 0.2, "maximum": 100.0},
+        )
         self.assertNotIn(result["gamma"], individual_gammas)
         self.assertNotEqual(result["gamma"], 1.0 / mean_gamma)
 

@@ -1,9 +1,23 @@
+import json
+import sys
+import tempfile
+import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import usb.core
 
-from cal_lib import SpyderX
+from cal_lib import GammaMeasurement, SpyderX
+
+
+def make_fit(gamma, luminance):
+    return types.SimpleNamespace(
+        gamma=gamma,
+        original_intensities=[-1.0, 0.0, 1.0],
+        original_luminance=luminance,
+        params=[1.0, gamma, 0.0],
+    )
 
 
 class FakeDevice:
@@ -167,6 +181,70 @@ class SpyderXUSBTests(unittest.TestCase):
         self.release.assert_not_called()
         self.dispose.assert_called_once_with(self.device)
 
+    def test_linux_permission_error_explains_udev_setup(self):
+        error = usb.core.USBError("access denied")
+        error.errno = 13
+        self.claim.side_effect = error
+
+        with mock.patch("cal_lib.platform.system", return_value="Linux"):
+            with self.assertRaisesRegex(PermissionError, "udev/60-spyderx.rules"):
+                SpyderX()
+
+        self.dispose.assert_called_once_with(self.device)
+
+    def test_measure_gamma_runs_repetitions_and_keeps_device_open(self):
+        spyder = SpyderX()
+        levels = mock.Mock()
+        levels.measure.side_effect = [
+            make_fit(2.1, [0.1, 20.0, 90.0]),
+            make_fit(2.3, [0.3, 25.0, 110.0]),
+        ]
+        fake_cal_psy = types.ModuleType("cal_psy")
+        fake_cal_psy.GrayLevels = mock.Mock(return_value=levels)
+
+        with mock.patch.dict(sys.modules, {"cal_psy": fake_cal_psy}), mock.patch(
+            "builtins.print"
+        ):
+            result = spyder.measure_gamma(
+                repetitions=2,
+                num_levels=3,
+                pause=0.5,
+                fullscr=True,
+                screen=1,
+            )
+
+        fake_cal_psy.GrayLevels.assert_called_once_with(
+            spyder,
+            fullscr=True,
+            screen=1,
+            size=None,
+            pos=None,
+        )
+        levels.calibrate.assert_called_once_with()
+        self.assertEqual(
+            levels.measure.call_args_list,
+            [
+                mock.call(
+                    pause=0.5,
+                    num_levels=3,
+                    wait_user=True,
+                    plot=False,
+                ),
+                mock.call(
+                    pause=0.5,
+                    num_levels=3,
+                    wait_user=False,
+                    plot=False,
+                ),
+            ],
+        )
+        levels.close.assert_called_once_with(close_spyder=False)
+        self.assertAlmostEqual(result.gamma, 2.2)
+        self.assertAlmostEqual(result.luminance_min, 0.2)
+        self.assertEqual(result.luminance_max, 100.0)
+        self.assertFalse(spyder._closed)
+        spyder.close()
+
     def test_close_is_idempotent(self):
         spyder = SpyderX()
 
@@ -175,6 +253,26 @@ class SpyderXUSBTests(unittest.TestCase):
 
         self.release.assert_called_once()
         self.dispose.assert_called_once()
+
+
+class GammaMeasurementTests(unittest.TestCase):
+    def test_result_can_be_saved_as_json(self):
+        result = GammaMeasurement(
+            [
+                make_fit(2.1, [0.1, 20.0, 90.0]),
+                make_fit(2.3, [0.3, 25.0, 110.0]),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = result.save_json(Path(directory) / "gamma.json")
+            saved = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(saved["schema_version"], 2)
+        self.assertAlmostEqual(saved["gamma"], 2.2)
+        self.assertEqual(saved["luminance"]["minimum"], 0.2)
+        self.assertEqual(saved["luminance"]["maximum"], 100.0)
+        self.assertEqual(len(saved["runs"]), 2)
 
 
 if __name__ == "__main__":

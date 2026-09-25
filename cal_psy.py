@@ -29,15 +29,18 @@ class GrayLevels:
                                    the position when omitted.
         """
         self.spyder = spyder
-        self.win = visual.Window(
-            size=size,
-            pos=pos,
+        window_options = dict(
             color=[0, 0, 0],
             units="norm",
             waitBlanking=True,
             fullscr=fullscr,
             screen=screen,
         )
+        if size is not None:
+            window_options["size"] = size
+        if pos is not None or not fullscr:
+            window_options["pos"] = pos
+        self.win = visual.Window(**window_options)
         self.bg_rect = visual.Rect(self.win, width=2, height=2, fillColor=[0, 0, 0], lineColor=None)
         self.bg_rect.draw()
 
@@ -60,7 +63,14 @@ class GrayLevels:
         self.spyder.calibrate()
         print('DONE')
 
-    def measure(self, pause=1, gamma=None, num_levels=12,wait_user=True):
+    def measure(
+        self,
+        pause=1,
+        gamma=None,
+        num_levels=12,
+        wait_user=True,
+        plot=True,
+    ):
         """
         Measures luminance levels across a range of grayscale values.
 
@@ -73,7 +83,8 @@ class GrayLevels:
             gamma (float, optional): A predefined gamma value to set for the monitor (for testing the linearity of the monitor after correction). If None, gamma remains unchanged.
                                      Defaults to None. Support depends on the PsychoPy display backend and operating system.
             num_levels (int): The number of gray levels to display and measure. Defaults to 12.
-            wait_user (bool): wait for keypress to start
+            wait_user (bool): Wait for a keypress before starting.
+            plot (bool): Show the fitted curve after measurement. Defaults to True.
 
         Returns:
             GammaFitter: An instance of the GammaFitter class containing the gamma value and the fit result.
@@ -111,21 +122,23 @@ class GrayLevels:
         gfit = GammaFitter(gray_levels, luminance_readings)
         gfit.fit()
         print(f"### GRAYLEVELS ### Monitor Gamma value: {gfit.gamma}")
-        gfit.plot()
+        if plot:
+            gfit.plot()
 
         if gamma is not None:
             # Reset monitor gamma to default
             self.win.setGamma(1)
         return gfit
 
-    def close(self):
+    def close(self, close_spyder=True):
         """
-        Closes the PsychoPy window and releases the SpyderX device.
+        Close the PsychoPy window and optionally release the SpyderX device.
 
         Ensures that all resources are properly cleaned up.
         """
         self.win.close()
-        self.spyder.close()
+        if close_spyder:
+            self.spyder.close()
 
 if __name__ == '__main__':
     from cal_lib import SpyderX

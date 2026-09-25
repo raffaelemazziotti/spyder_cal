@@ -1,0 +1,2 @@
+# Datacolor SpyderX (085c:0a00): allow logged-in desktop users to access it.
+SUBSYSTEM=="usb", ATTR{idVendor}=="085c", ATTR{idProduct}=="0a00", MODE="0660", GROUP="plugdev", TAG+="uaccess"

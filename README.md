@@ -1,86 +1,138 @@
-# SpyderX Monitor Calibration Library
+# SpyderX display gamma measurement
 
-This project uses PyUSB to communicate with a Datacolor SpyderX Pro and
-PsychoPy to present gray levels for monitor gamma measurement. Linux, Windows,
-and macOS use the same SpyderX protocol and calibration calculations; only the
-libusb setup differs by platform.
+Measure a monitor's gamma and luminance range with a Datacolor SpyderX and
+PsychoPy. The library supports Linux, Windows, and macOS through PyUSB/libusb.
 
-## Project structure
+## Quick start
 
-- `cal_lib.py` contains `SpyderX` and the gamma-fitting code.
-- `cal_psy.py` contains the PsychoPy `GrayLevels` presentation helper.
-- `Demo.py` demonstrates a complete calibration run.
-- `diagnostics/test_spyder.py` checks USB initialization without changing
-  factory calibration data.
-
-## Python dependencies
-
-Create and activate a virtual environment, then install the platform-neutral
-Python dependencies:
+Install the Python dependencies in a virtual environment:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate       # Windows cmd: .venv\Scripts\activate.bat
+source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-PyUSB is the USB abstraction on every supported platform. The native libusb
-library is a system dependency and is intentionally not a Windows-only Python
-package in `requirements.txt`.
+Connect the SpyderX, then run:
+
+```bash
+python Demo.py
+```
+
+The program guides you through dark calibration and sensor placement on screen.
+It performs three measurement runs and writes
+`calibration_results/stimulator_gamma.json`.
+
+Common command-line options can be used without editing the script:
+
+```bash
+# Use PsychoPy display 1 and collect five runs.
+python Demo.py --screen 1 --repetitions 5
+
+# Quick windowed test with a custom output file.
+python Demo.py --windowed --levels 6 --output test-gamma.json
+
+python Demo.py --help
+```
+
+The same workflow is available as a small Python API:
+
+```python
+from cal_lib import SpyderX
+
+with SpyderX() as spyder:
+    result = spyder.measure_gamma(repetitions=3)
+    result.save_json("gamma.json")
+
+print(f"Gamma: {result.gamma:.3f}")
+print(
+    f"Luminance: {result.luminance_min:.3f} to "
+    f"{result.luminance_max:.3f} cd/m²"
+)
+```
+
+`measure_gamma()` opens a fullscreen PsychoPy window on display 0 at its native
+resolution. Its most useful options are:
+
+```python
+result = spyder.measure_gamma(
+    repetitions=3,  # independent runs; the result contains their mean and SD
+    num_levels=12,  # gray levels sampled from black to white
+    pause=1,        # display stabilization time in seconds
+    screen=0,       # PsychoPy display number
+    fullscr=True,
+)
+```
+
+The returned `GammaMeasurement` provides:
+
+- `gamma`, `gamma_std`, and `gamma_values`
+- `luminance_min`, `luminance_max`, and their standard deviations
+- `runs`, containing every gray level, measured luminance, and fitted parameter
+- `to_dict()` and `save_json(path)` for serialization
+
+The JSON keeps `gamma` as a top-level scalar for simple runtime use and includes
+the full measured curves for inspection:
+
+```json
+{
+  "schema_version": 2,
+  "gamma": 2.2,
+  "gamma_std": 0.03,
+  "gamma_by_repetition": [2.18, 2.22, 2.2],
+  "luminance": {
+    "unit": "cd/m^2",
+    "minimum": 0.15,
+    "maximum": 105.4
+  },
+  "runs": []
+}
+```
+
+The actual file also contains per-repetition luminance extrema, their standard
+deviations, and all samples in `runs`.
 
 ## Linux setup
 
-On Ubuntu/Xubuntu:
+Install libusb and the virtual-environment support package. On Ubuntu/Xubuntu:
 
 ```bash
 sudo apt update
 sudo apt install libusb-1.0-0 python3-venv
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-usb.txt
 ```
 
-`SpyderX()` asks PyUSB to discover the installed libusb automatically. Root is
-not required. If your user cannot open the USB device, install this udev rule
-for the project's SpyderX USB ID, `085c:0a00`:
-
-```udev
-SUBSYSTEM=="usb", ATTR{idVendor}=="085c", ATTR{idProduct}=="0a00", MODE="0660", GROUP="plugdev", TAG+="uaccess"
-```
-
-For example:
+Linux normally needs a udev rule so your user can access the SpyderX without
+running Python as root. A ready-made rule is included:
 
 ```bash
-echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="085c", ATTR{idProduct}=="0a00", MODE="0660", GROUP="plugdev", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/60-spyderx.rules
+sudo cp udev/60-spyderx.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Unplug and reconnect the SpyderX, then verify enumeration and initialization:
+Unplug and reconnect the SpyderX, then verify it:
 
 ```bash
 lsusb -d 085c:0a00
 python diagnostics/test_spyder.py
 ```
 
-That smaller requirements file is sufficient for USB diagnostics and direct
-measurements. To run `Demo.py` and `cal_psy.py`, also install PsychoPy with
-`python -m pip install -r requirements.txt`. PsychoPy's Linux installation can
-require a supported Python version and additional GUI dependencies; consult
-its official Linux installation guide if pip cannot provide suitable wheels
-for your Ubuntu/Python combination.
+If access is still denied, confirm that the `plugdev` group exists on your
+distribution or edit the group in `udev/60-spyderx.rules`. Do not work around
+USB permissions by running the calibration with `sudo`, because a root process
+may not be able to use your graphical session.
 
-The rule is normally required only when `lsusb` sees the device but the
-diagnostic reports a permission/access error. Do not run the diagnostic with
-`sudo`; fix udev access instead. Some distributions use a different desktop
-access policy or group, so adjust `GROUP="plugdev"` if that group is absent.
+For USB diagnostics without PsychoPy, install only:
+
+```bash
+python -m pip install -r requirements-usb.txt
+```
 
 ## macOS setup
 
-Install libusb with Homebrew when it is not already available, then install the
-Python dependencies:
+The existing macOS workflow is unchanged. Install libusb with Homebrew and then
+the Python dependencies:
 
 ```bash
 brew install libusb
@@ -91,66 +143,67 @@ python -m pip install -r requirements.txt
 python diagnostics/test_spyder.py
 ```
 
-No library path is normally necessary: `SpyderX()` uses PyUSB automatic
-backend discovery.
+`SpyderX()` normally discovers Homebrew's libusb automatically.
 
 ## Windows setup
 
-The existing explicit-DLL workflow remains supported. Install a
-libusb-compatible device driver for the SpyderX (for example libusbK using
-[Zadig](https://zadig.akeo.ie/)); the vendor DataColor driver cannot be used by
-PyUSB at the same time. If an unsuitable DataColor driver remains installed,
-the existing [Driver Store Explorer](https://github.com/lostindark/DriverStoreExplorer)
-workflow may still be needed before selecting the device driver with Zadig.
+The existing Windows workflow is unchanged. The SpyderX must use a
+libusb-compatible driver, such as libusbK installed with
+[Zadig](https://zadig.akeo.ie/). Carefully select the SpyderX (`085c:0a00`);
+replacing another device's driver can disable that device until restored.
 
-Install libusb through the existing vcpkg workflow if desired:
+When `libusb-1.0.dll` is on the normal DLL search path, use the same API as
+Linux and macOS:
+
+```python
+with SpyderX() as spyder:
+    result = spyder.measure_gamma()
+```
+
+The explicit DLL workflow remains supported:
+
+```python
+with SpyderX(
+    libusb_path=r"C:\path\to\libusb-1.0.dll"
+) as spyder:
+    result = spyder.measure_gamma()
+```
+
+If needed, libusb can still be built or installed through vcpkg:
 
 ```bat
-git clone https://github.com/microsoft/vcpkg.git
-cd vcpkg
-bootstrap-vcpkg.bat
 vcpkg install libusb:x64-windows
 ```
 
 The DLL is normally under
-`vcpkg\installed\x64-windows\bin\libusb-1.0.dll`. If it is discoverable through
-the normal Windows DLL search path, this works:
+`vcpkg\installed\x64-windows\bin\libusb-1.0.dll`.
 
-```python
-spyder = SpyderX()
-```
+## Direct luminance measurements
 
-Otherwise preserve the explicit path:
-
-```python
-spyder = SpyderX(
-    libusb_path=r"C:\path\to\libusb-1.0.dll"
-)
-```
-
-When changing a USB device driver with Zadig, carefully select the SpyderX;
-replacing the driver for another device can make that device unusable until its
-driver is restored.
-
-## Usage
-
-Automatic libusb discovery is the preferred cross-platform API:
+PsychoPy is not imported when using the low-level photometer API:
 
 ```python
 from cal_lib import SpyderX
 
 with SpyderX() as spyder:
-    # Cover/close the sensor before black calibration.
+    input("Cover the sensor, then press Enter...")
     spyder.calibrate()
-    print(spyder.get_luminance())
+    input("Place the sensor on the display, then press Enter...")
+    print(f"Luminance: {spyder.get_luminance():.3f} cd/m²")
 ```
 
-The context manager releases the claimed interface, restores a kernel driver
-that it detached, and disposes PyUSB resources even if measurement raises an
-exception. Existing non-context-manager usage remains valid; call
-`spyder.close()` when finished.
+The diagnostic provides the same check:
 
-For monitor calibration:
+```bash
+python diagnostics/test_spyder.py --measure
+```
+
+On Windows, add `--libusb-path C:\path\to\libusb-1.0.dll` when required.
+
+## Advanced PsychoPy control
+
+Existing code using `GrayLevels` remains supported. This lower-level API is
+useful for custom windows or measurement sequences:
 
 ```python
 from cal_lib import SpyderX
@@ -172,43 +225,34 @@ with SpyderX() as spyder:
         levels.close()
 ```
 
-`size`, `pos`, `fullscr`, and `screen` are passed to PsychoPy's window. The
-defaults retain the previous 800x600 windowed behavior. Display numbering and
-window positioning are controlled by PsychoPy and the host window system.
+`GrayLevels.measure(plot=False)` suppresses the interactive fit plot, and
+`GrayLevels.close(close_spyder=False)` closes only the PsychoPy window when the
+device is managed elsewhere.
 
-## Diagnostic and tests
+## Troubleshooting
 
-The default diagnostic only discovers and initializes the device. It does not
-write permanent calibration data:
+- **Device not found:** check the cable and run `lsusb -d 085c:0a00` on Linux.
+- **Permission denied on Linux:** install the included udev rule and reconnect.
+- **No libusb backend:** install the native libusb package for your platform.
+- **PsychoPy import failure:** install `requirements.txt` in a PsychoPy-supported
+  Python environment.
+- **Wrong display:** pass the correct PsychoPy `screen` number.
+- **Unstable measurements:** minimize ambient light, allow the display to warm
+  up, and use multiple repetitions.
 
-```bash
-python diagnostics/test_spyder.py
-```
+## Tests and project layout
 
-An optional black calibration and one luminance measurement can be requested:
-
-```bash
-python diagnostics/test_spyder.py --measure
-```
-
-On Windows an explicit DLL can also be supplied:
-
-```bat
-python diagnostics\test_spyder.py --libusb-path C:\path\to\libusb-1.0.dll
-```
-
-Run the mocked test suite without connecting a USB device:
+Run the mocked test suite without a connected device:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## Calibration guidance
-
-- Use `fullscr=True` for final display measurements.
-- Allow the display to stabilize before measuring.
-- Cover the SpyderX during black calibration.
-- Minimize ambient light and repeat measurements when appropriate.
+- `cal_lib.py`: `SpyderX`, `GammaMeasurement`, and gamma fitting
+- `cal_psy.py`: PsychoPy gray-level presentation
+- `Demo.py`: recommended complete measurement example
+- `calibration_stimulator.py`: machine-specific single-monitor routine
+- `diagnostics/test_spyder.py`: USB and direct-luminance diagnostic
 
 The SpyderX implementation was adapted from
 [patrickmineault/spyderX](https://github.com/patrickmineault/spyderX).
