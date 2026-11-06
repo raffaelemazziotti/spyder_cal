@@ -1,3 +1,10 @@
 .venv/
 __pycache__/
 *.py[cod]
+node_modules/
+desktop/dist/
+desktop/.cache/
+desktop/build/
+release/
+*.spec
+!desktop/backend.spec

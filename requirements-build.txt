@@ -1,0 +1,4 @@
+-r requirements.txt
+psychopy==2026.2.5
+libusb-package==1.0.30.0
+pyinstaller==6.22.3

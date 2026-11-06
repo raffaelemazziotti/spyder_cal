@@ -1,0 +1,163 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Install and use the Spyder Cal Python API: measure gamma, read luminance, save JSON results, fit curves and control PsychoPy gray levels.">
+  <meta name="theme-color" content="#eff1ed">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/site.css">
+  <title>Python API — Spyder Cal</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">S·</span><span>Spyder Cal</span></a>
+    <a class="source-link" href="installation.html">App installation ↗</a>
+  </header>
+  <main class="guide">
+    <p class="eyebrow">FOR PYTHON USERS</p>
+    <h1>Python API.</h1>
+    <p class="guide-intro">Measure gamma in your own scripts, read the sensor directly, or fit measurements you already have. The same Python interface is used on Windows and Linux.</p>
+    <nav class="contents" aria-label="On this page"><a href="#install">Install</a><a href="#gamma">Measure gamma</a><a href="#results">Results</a><a href="#luminance">Read luminance</a><a href="#fitting">Fit a curve</a><a href="#advanced">PsychoPy control</a><a href="#reference">Reference</a></nav>
+
+    <section id="install">
+      <h2>Install from source</h2>
+      <p>Clone the repository and run scripts from its root so Python can import <code>cal_lib.py</code> and <code>cal_psy.py</code>. The library is not installed as a package by these commands. The examples below use Python 3.10 and PsychoPy 2026.2.5, as tested for this release.</p>
+      <pre><code class="language-bash">git clone https://github.com/raffaelemazziotti/spyder_cal.git
+cd spyder_cal</code></pre>
+      <h3>Windows · PowerShell</h3>
+      <pre><code class="language-powershell">py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install "psychopy==2026.2.5" -r requirements.txt
+.\.venv\Scripts\python.exe Demo.py --screen 0 --repetitions 3</code></pre>
+      <p>Install the <a href="installation.html#windows-driver">SpyderX USB driver</a> if needed. The Windows requirements include the libusb DLL through <code>libusb-package</code>.</p>
+      <h3>Linux · Ubuntu 22.04</h3>
+      <pre><code class="language-bash">sudo apt install python3.10-venv libusb-1.0-0
+python3.10 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install "psychopy==2026.2.5" -r requirements.txt
+.venv/bin/python Demo.py --screen 0 --repetitions 3</code></pre>
+      <p>Set up <a href="installation.html#linux-usb">udev USB access</a> before measuring. PsychoPy needs a graphical desktop and native display dependencies; consult its <a href="https://psychopy.org/download.html">installation guide</a> if a dependency cannot be installed. The <a href="./">standalone app</a> includes these Python dependencies.</p>
+      <p>For direct USB reads or fitting without PsychoPy, install <code>requirements-usb.txt</code> instead of the full requirements. Select the same <code>.venv</code> interpreter in your editor or use its Python executable when running your scripts.</p>
+    </section>
+
+    <section id="gamma">
+      <h2>Measure display gamma</h2>
+      <p>This opens a PsychoPy window, guides dark calibration and sensor placement, and measures independent sweeps from black to white.</p>
+      <pre><code class="language-python">from cal_lib import SpyderX
+
+with SpyderX() as spyder:
+    result = spyder.measure_gamma(
+        repetitions=3,
+        num_levels=12,
+        pause=1.0,
+        screen=0,
+        fullscr=True,
+    )
+    result.save_json("gamma.json")
+
+print(f"Gamma: {result.gamma:.3f} (SD {result.gamma_std:.3f})")
+print(f"Black: {result.luminance_min:.3f} cd/m²")
+print(f"White: {result.luminance_max:.3f} cd/m²")</code></pre>
+      <p>Follow the fullscreen prompts and press Space to confirm. <code>with SpyderX()</code> releases the USB interface when the block ends, including when an error occurs. <code>measure_gamma()</code> closes its own PsychoPy window.</p>
+      <div class="table-wrap"><table><caption>measure_gamma() options</caption><thead><tr><th>Parameter</th><th>Default</th><th>Meaning</th></tr></thead><tbody>
+        <tr><td><code>repetitions</code></td><td><code>3</code></td><td>Independent sweeps; at least 1.</td></tr>
+        <tr><td><code>num_levels</code></td><td><code>12</code></td><td>Gray levels, including black and white; at least 3.</td></tr>
+        <tr><td><code>pause</code></td><td><code>1</code></td><td>Settling seconds before each read; nonnegative.</td></tr>
+        <tr><td><code>screen</code></td><td><code>0</code></td><td>PsychoPy display index; use 1 for another display if available.</td></tr>
+        <tr><td><code>fullscr</code></td><td><code>True</code></td><td>Use the selected display fullscreen.</td></tr>
+        <tr><td><code>size</code>, <code>pos</code></td><td><code>None</code></td><td>Optional window size/position in pixels. Without size, fullscreen uses native resolution.</td></tr>
+        <tr><td><code>dark_calibration</code></td><td><code>True</code></td><td>Prompt for covered-sensor calibration. Disable only after calibrating this sensor instance yourself.</td></tr>
+      </tbody></table></div>
+      <p>These Python sweeps measure the original response. For the complete original/corrected measurement workflow with paired plots and exports, use the <a href="installation.html#measure">desktop app</a>. To apply the measured exponent in an experiment, see <a href="installation.html#psychopy">Use in PsychoPy</a>.</p>
+    </section>
+
+    <section id="results">
+      <h2>Results and JSON</h2>
+      <p><code>measure_gamma()</code> returns a <code>GammaMeasurement</code>. Gamma and luminance summaries are arithmetic means across repetitions; standard deviations are sample SDs, or zero for a single repetition.</p>
+      <div class="table-wrap"><table><thead><tr><th>Attribute / method</th><th>Contents</th></tr></thead><tbody>
+        <tr><td><code>gamma</code>, <code>gamma_std</code></td><td>Mean fitted exponent and its SD.</td></tr>
+        <tr><td><code>gamma_values</code></td><td>One exponent per repetition.</td></tr>
+        <tr><td><code>luminance_min</code>, <code>luminance_max</code></td><td>Mean per-run minimum and maximum, in cd/m².</td></tr>
+        <tr><td><code>luminance_min_std</code>, <code>luminance_max_std</code></td><td>SDs of those per-run extrema.</td></tr>
+        <tr><td><code>runs</code></td><td>List of dictionaries: repetition, gamma, gray_levels, luminance and fit_parameters.</td></tr>
+        <tr><td><code>to_dict()</code></td><td>JSON-serializable dictionary, including every reading.</td></tr>
+        <tr><td><code>save_json(path)</code></td><td>Atomically writes JSON, creates parent directories, returns an absolute pathlib.Path.</td></tr>
+      </tbody></table></div>
+      <p>Each run's <code>gray_levels</code> contains the original PsychoPy values from −1 to +1. Luminance samples are cd/m². Fitted parameters are <code>[a, b, c]</code> for the normalized model <code>y = a * x**b + c</code>; gamma is <code>b</code>.</p>
+      <pre><code class="language-python">import json
+
+with open("gamma.json", encoding="utf-8") as file:
+    data = json.load(file)
+
+print(data["gamma"])
+print(data["gamma_by_repetition"])
+print(data["luminance"]["maximum"])
+print(data["runs"][0]["luminance"])</code></pre>
+      <p>Python library JSON uses <code>schema_version: 2</code>. Desktop app sessions have a different schema containing original/corrected sweeps and settings; the app's Open command expects those app sessions. Both formats expose a top-level <code>gamma</code> scalar.</p>
+    </section>
+
+    <section id="luminance">
+      <h2>Read luminance directly</h2>
+      <p>No PsychoPy window is opened by the low-level sensor API. You control the displayed stimulus and allow it to settle before reading.</p>
+      <pre><code class="language-python">from cal_lib import SpyderX
+
+with SpyderX() as spyder:
+    input("Cover the sensor, then press Enter: ")
+    spyder.calibrate()
+    input("Uncover it and place it on your stable display patch, then Enter: ")
+    luminance = spyder.get_luminance()
+    print(f"Luminance: {luminance:.3f} cd/m²")
+    xyz = spyder.measure()  # a new reading: NumPy array [X, Y, Z]</code></pre>
+      <p>Call <code>calibrate()</code> with the lens covered before the first reading. <code>get_luminance()</code> returns the Y component of a new XYZ measurement. <code>get_rgb_luminance()</code> returns an approximate linear RGB tuple from a new reading; it is not a display RGB calibration.</p>
+      <p>Usually <code>SpyderX()</code> discovers libusb automatically. An explicit shared-library path is also accepted, for example <code>SpyderX(libusb_path=r"C:\path\to\libusb-1.0.dll")</code> on Windows.</p>
+    </section>
+
+    <section id="fitting">
+      <h2>Fit existing measurements</h2>
+      <p><code>GammaFitter</code> needs neither a sensor nor PsychoPy. Supply equal-length intensity and luminance arrays with a nonzero range in both. It normalizes each array to 0–1 and fits a power law with scale and offset.</p>
+      <pre><code class="language-python">import numpy as np
+from cal_lib import GammaFitter
+
+# Illustrative data; replace with your measured samples.
+intensity = np.linspace(0, 1, 12)
+luminance = 0.2 + 120 * intensity**2.2
+fit = GammaFitter(intensity, luminance)
+parameters = fit.fit()  # [scale, gamma, offset] in normalized units
+print(fit.gamma)
+fit.plot()</code></pre>
+      <p>Before <code>fit()</code>, use <code>set_bounds(lower_bounds, upper_bounds)</code> or <code>set_initial_guess(initial_guess)</code> to customize the three model parameters. <code>plot()</code> displays the readings and fit on the original scales.</p>
+    </section>
+
+    <section id="advanced">
+      <h2>Control PsychoPy gray levels</h2>
+      <p>Use <code>GrayLevels</code> for custom measurement sequences. It owns its PsychoPy window; the sensor can be managed separately.</p>
+      <pre><code class="language-python">from cal_lib import SpyderX
+from cal_psy import GrayLevels
+
+with SpyderX() as spyder:
+    levels = GrayLevels(spyder, fullscr=True, screen=0, size=None)
+    try:
+        levels.calibrate()
+        fit = levels.measure(num_levels=12, pause=1, plot=False)
+        print(fit.gamma)
+    finally:
+        levels.close(close_spyder=False)</code></pre>
+      <p><code>measure(pause=1, gamma=None, num_levels=12, wait_user=True, plot=True)</code> returns a fitted <code>GammaFitter</code>. Set <code>wait_user=False</code> for another sweep without repeating the placement prompt. The optional <code>gamma</code> requests PsychoPy display-table correction and depends on the OS/backend; it is distinct from the app's pixel-value correction.</p>
+    </section>
+
+    <section id="reference">
+      <h2>API reference and source</h2>
+      <ul>
+        <li><a href="cal_lib.html">cal_lib</a> — SpyderX, GammaMeasurement, GammaFitter and xyz_to_lms.</li>
+        <li><a href="cal_psy.html">cal_psy</a> — GrayLevels and its PsychoPy window.</li>
+        <li><a href="https://github.com/raffaelemazziotti/spyder_cal/blob/main/Demo.py">Demo.py</a> — complete command-line example; run <code>Demo.py --help</code> for options.</li>
+        <li><a href="https://github.com/raffaelemazziotti/spyder_cal">Python source on GitHub</a>.</li>
+      </ul>
+      <p>For device detection or permission errors, follow the <a href="installation.html">Windows/Linux setup guide</a>. The diagnostic <code>python diagnostics/test_spyder.py --measure</code> checks USB access and a direct sensor reading.</p>
+    </section>
+  </main>
+  <footer><a href="./">← Downloads</a><nav aria-label="Project links"><a href="installation.html">Installation</a><a href="https://github.com/raffaelemazziotti/spyder_cal">GitHub</a></nav></footer>
+</body>
+</html>

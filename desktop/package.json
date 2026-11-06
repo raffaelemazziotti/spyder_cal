@@ -1,0 +1,70 @@
+{
+  "name": "spyder-cal",
+  "version": "0.1.2",
+  "description": "SpyderX gamma measurement and verification for PsychoPy",
+  "private": true,
+  "license": "MIT",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node launch.cjs",
+    "dist": "node build-release.cjs",
+    "build:backend": "python -m PyInstaller --noconfirm --distpath build --workpath build/pyinstaller backend.spec",
+    "build:win": "electron-builder --win portable --x64",
+    "build:linux": "electron-builder --linux AppImage tar.gz --x64",
+    "test": "node --test test/*.test.cjs",
+    "test:ui": "node test/run-ui.cjs",
+    "test:psychopy": "node --test test/psychopy.cjs",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check renderer.js && node --check worker.cjs && node --check launch.cjs"
+  },
+  "build": {
+    "appId": "org.spydercal.desktop",
+    "productName": "Spyder Cal",
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "worker.cjs",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/spyder-cal-backend",
+        "to": "backend"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE-source.txt"
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.txt",
+        "to": "THIRD-PARTY-NOTICES.txt"
+      }
+    ],
+    "artifactName": "Spyder-Cal-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "unpackDirName": true,
+      "splashImage": "assets/startup.bmp"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Science",
+      "maintainer": "Spyder Cal contributors"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  }
+}

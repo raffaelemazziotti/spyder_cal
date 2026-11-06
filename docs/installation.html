@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Install Spyder Cal on Windows or Linux, connect a SpyderX, measure display gamma, and save values for PsychoPy.">
+  <meta name="theme-color" content="#eff1ed">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/site.css">
+  <title>Installation &amp; setup — Spyder Cal</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">S·</span><span>Spyder Cal</span></a>
+    <a class="source-link" href="api.html">Python API ↗</a>
+  </header>
+  <main class="guide">
+    <p class="eyebrow">GET STARTED</p>
+    <h1>Installation &amp; setup.</h1>
+    <p class="guide-intro">Download the app, connect your SpyderX, and measure. Python, PsychoPy and the plotting tools are already included in both downloads.</p>
+    <nav class="contents" aria-label="On this page"><a href="#windows">Windows</a><a href="#linux">Linux</a><a href="#measure">First measurement</a><a href="#psychopy">Use in PsychoPy</a><a href="#files">Save files</a></nav>
+
+    <section id="windows">
+      <h2>Windows</h2>
+      <ol>
+        <li><a href="https://github.com/raffaelemazziotti/spyder_cal/releases/latest/download/Spyder-Cal-windows-x64.zip">Download the Windows ZIP</a> (64-bit).</li>
+        <li>Right-click the ZIP and choose <strong>Extract All</strong>. Open the extracted <strong>Spyder Cal</strong> folder.</li>
+        <li>Double-click <strong>Spyder Cal.exe</strong>. Keep all the other files and the <code>resources</code> folder beside it.</li>
+        <li>Plug in the SpyderX, close other programs using the sensor, and press <strong>Connect</strong> in the app.</li>
+      </ol>
+      <p>No separate Python, Node.js or PsychoPy installation is needed.</p>
+      <h3 id="windows-driver">USB driver</h3>
+      <p>The SpyderX needs a <strong>WinUSB</strong> or <strong>libusbK</strong> driver. If Connect succeeds, the driver is ready. Otherwise, check the device in Windows Device Manager.</p>
+      <p>If a compatible driver is missing, use <a href="https://zadig.akeo.ie/">Zadig</a>: choose <strong>Options → List All Devices</strong>, select <strong>Datacolor SpyderX</strong> with USB ID <code>085C:0A00</code>, and install WinUSB or libusbK. Check the device and ID before changing its driver. Reconnect the sensor and try Connect again.</p>
+      <details><summary>Single-file portable alternative</summary><p>The <a href="https://github.com/raffaelemazziotti/spyder_cal/releases/latest/download/Spyder-Cal-windows-x64.exe">portable .exe</a> needs no manual extraction. It shows a loading panel while unpacking its runtime on every launch, which can take tens of seconds. The ZIP is recommended for faster repeated startups.</p></details>
+    </section>
+
+    <section id="linux">
+      <h2>Linux</h2>
+      <p>The x86_64 AppImage was built on Ubuntu 22.04. Use a graphical desktop with working OpenGL. Download it, then run these commands from your Downloads folder:</p>
+      <pre><code class="language-bash">cd ~/Downloads
+chmod +x Spyder-Cal-linux-x86_64.AppImage
+./Spyder-Cal-linux-x86_64.AppImage</code></pre>
+      <p><a href="https://github.com/raffaelemazziotti/spyder_cal/releases/latest/download/Spyder-Cal-linux-x86_64.AppImage">Download the Linux AppImage</a></p>
+      <h3 id="linux-usb">USB access</h3>
+      <p>Install libusb and the supplied udev rule so the app can access the SpyderX as your normal desktop user. On Ubuntu 22.04:</p>
+      <pre><code class="language-bash">sudo apt update
+sudo apt install libusb-1.0-0
+curl -fsSLO https://raw.githubusercontent.com/raffaelemazziotti/spyder_cal/main/udev/60-spyderx.rules
+sudo install -m 644 60-spyderx.rules /etc/udev/rules.d/60-spyderx.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger</code></pre>
+      <p><strong>Unplug and reconnect the sensor</strong>, then press Connect. The rule grants access to the active desktop user through <code>uaccess</code>, with <code>plugdev</code> as a group fallback. If your distribution uses another device-access group, adapt the rule. Run the app as your normal user.</p>
+      <details><summary>FUSE or missing system libraries</summary>
+        <p>If FUSE is unavailable, use the AppImage's extraction mode:</p>
+        <pre><code class="language-bash">./Spyder-Cal-linux-x86_64.AppImage --appimage-extract-and-run</code></pre>
+        <p>On Ubuntu 22.04, missing desktop libraries can be installed with:</p>
+        <pre><code class="language-bash">sudo apt install libgtk-3-0 libnss3 libasound2 libgl1</code></pre>
+        <p>Package names vary on other distributions. See the <a href="https://docs.appimage.org/user-guide/troubleshooting/fuse.html">AppImage FUSE guide</a> for more options.</p>
+      </details>
+      <p class="note">The Linux runtime, exports and PsychoPy window have been checked on Ubuntu 22.04 under WSL. Physical SpyderX USB measurements still need verification on a native Linux installation.</p>
+    </section>
+
+    <section id="measure">
+      <h2>Your first measurement</h2>
+      <ol>
+        <li>Let the display warm up. Keep brightness, contrast, HDR, adaptive brightness, Night Light and any existing color calibration fixed during measurement and experiments.</li>
+        <li>Press <strong>Connect</strong>. Choose a <strong>Screen</strong> and use <strong>Test screen</strong> to confirm the display. Screen numbering follows PsychoPy.</li>
+        <li>Set the monitor name, gray levels, repetitions and settling time. Enable the corrected measurement to verify linearization.</li>
+        <li>Press <strong>Measure</strong>. Follow the instructions in the fullscreen PsychoPy window: cover the sensor for dark calibration, then uncover it and place it at the center of the display. Press <strong>Space</strong> when prompted. <strong>Escape</strong> cancels.</li>
+        <li>At completion, remove the sensor and press Space to return. The left plot shows the original measurements; the right shows actual measurements with inverse-gamma-corrected patch values.</li>
+      </ol>
+      <p>All measurement instructions stay in the PsychoPy window, including on a single-monitor computer. The app measures grayscale gamma; it does not measure separate red, green and blue gamma curves.</p>
+    </section>
+
+    <section id="psychopy">
+      <h2>Use the value in PsychoPy</h2>
+      <p>Use <strong>Copy</strong> in the Gamma card and enter that original measured exponent in PsychoPy's Monitor Center. You can also set it when creating a Python experiment window:</p>
+      <pre><code class="language-python">from psychopy import visual
+
+# Replace 2.215 with your measured original gamma.
+win = visual.Window(screen=0, fullscr=True, gamma=2.215)
+# Present your experiment stimuli here.
+win.close()</code></pre>
+      <p>Use the measured exponent, not its reciprocal or the corrected curve's exponent. The app verifies correction through patch pixel values; PsychoPy's window setting uses the display gamma table. Support depends on the OS and graphics backend, so measure the final experiment output to verify it.</p>
+      <p>See PsychoPy's <a href="https://psychopy.org/general/gamma.html">gamma correction guide</a> and <a href="https://psychopy.org/api/visual/window.html">Window API</a>. The app does not install a system color profile.</p>
+    </section>
+
+    <section id="files">
+      <h2>Save and repeat</h2>
+      <p><strong>Save files</strong> exports a JSON session, a CSV of every reading, and PNG/SVG plots. Copy buttons in the summary cards copy individual values. Luminance is in cd/m²; corrected error is RMSE as a percentage of the original luminance range.</p>
+      <p>Use <strong>New</strong> for another measurement, or <strong>Open → Recent measurements</strong> to revisit a completed session. <strong>Open → Open file</strong> loads an app-exported JSON. The Python library's JSON uses a different schema; see the <a href="api.html#results">Python API guide</a>.</p>
+      <p>For source installation and development, see the <a href="https://github.com/raffaelemazziotti/spyder_cal/blob/main/desktop/README.md">desktop README</a>.</p>
+    </section>
+  </main>
+  <footer><a href="./">← Downloads</a><nav aria-label="Project links"><a href="api.html">Python API</a><a href="https://github.com/raffaelemazziotti/spyder_cal">GitHub</a></nav></footer>
+</body>
+</html>

@@ -1,0 +1,57 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Spyder Cal</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <header class="control-bar" aria-label="Status and controls">
+    <div class="brand"><span class="brand-mark">S·</span><strong>Spyder Cal</strong><small id="app-version">v0.1.2</small></div>
+    <div id="device-status" class="device-status" role="status"><span class="tiny-dot"></span><span id="device-text">Not checked</span></div>
+    <button id="check-device" class="button connection-button">Connect</button>
+    <button id="test-screen" class="button">Test screen</button>
+    <div class="toolbar-spacer"></div>
+    <button id="new-session" class="button" title="Clear the current view for a new measurement">New</button>
+    <details id="open-menu" class="toolbar-menu"><summary class="button">Open ▾</summary><div class="menu-items"><button id="open-session">Open file…</button><button id="recent-sessions">Recent measurements</button></div></details>
+    <button id="export" class="button export-button" title="Save JSON, CSV, PNG and SVG" disabled>Save files</button>
+    <button id="python-settings" class="button icon-button" title="Runtime and USB settings" aria-label="Runtime and USB settings">⚙</button>
+  </header>
+  <div id="progress-panel" class="activity" role="status" aria-live="polite"><span id="activity-spinner" class="spinner small" hidden></span><strong id="progress-title">Starting…</strong><span id="progress-detail"></span><progress id="progress" max="100" value="0" hidden></progress><button id="cancel" class="button danger" hidden>Cancel</button></div>
+  <main>
+    <section class="setup panel" aria-label="Measurement setup">
+      <form id="measurement-form">
+        <div class="form-grid">
+          <label>Monitor name<input id="monitor-name" value="My monitor" maxlength="120" required autocomplete="off"></label>
+          <label>Screen<select id="screen"><option value="0">Screen 0</option></select></label>
+          <label>Gray levels<input id="levels" type="number" min="5" max="65" step="1" value="15" required></label>
+          <label>Repetitions<input id="repetitions" type="number" min="1" max="10" step="1" value="3" required></label>
+          <label>Settle time (s)<input id="pause" type="number" min="0.1" max="10" step="0.1" value="1" required></label>
+        </div>
+        <div class="setup-actions"><label class="checkbox"><input id="verify" type="checkbox" checked>Verify with corrected measurements</label><span id="estimate" class="estimate"></span><button id="start" class="button primary" type="submit">Measure →</button></div>
+      </form>
+    </section>
+    <div class="metrics">
+      <article class="metric panel"><div class="metric-heading"><span>GAMMA</span><button id="copy-gamma" class="copy-button" title="Copy gamma for PsychoPy" aria-label="Copy gamma for PsychoPy" disabled>Copy</button></div><div id="gamma-value" class="metric-value">—</div><span id="gamma-detail" class="metric-detail">Original measured exponent</span></article>
+      <article class="metric panel"><div class="metric-heading"><span>BLACK LUMINANCE</span><button id="copy-black" class="copy-button" title="Copy black luminance in cd/m²" aria-label="Copy black luminance" disabled>Copy</button></div><div class="metric-value"><span id="black-value">—</span><small>cd/m²</small></div><span class="metric-detail">At minimum intensity</span></article>
+      <article class="metric panel"><div class="metric-heading"><span>WHITE LUMINANCE</span><button id="copy-white" class="copy-button" title="Copy white luminance in cd/m²" aria-label="Copy white luminance" disabled>Copy</button></div><div class="metric-value"><span id="white-value">—</span><small>cd/m²</small></div><span class="metric-detail">At maximum intensity</span></article>
+      <article class="metric panel"><div class="metric-heading"><span>CORRECTED ERROR</span><button id="copy-error" class="copy-button" title="Copy corrected RMSE in percent" aria-label="Copy corrected error" disabled>Copy</button></div><div class="metric-value"><span id="error-value">—</span><small>%</small></div><span id="error-detail" class="metric-detail">RMSE of luminance range</span></article>
+    </div>
+    <section class="plots" aria-label="Measurement curves">
+      <div class="plots-toolbar"><p id="chart-subtitle">Current measurement</p><div class="chart-controls"><label class="checkbox"><input id="show-runs" type="checkbox" checked>Individual runs</label><div class="segmented"><button id="absolute" class="active">cd/m²</button><button id="normalized">Normalized</button></div></div></div>
+      <div class="plots-grid">
+        <article class="chart-panel panel"><div class="chart-heading"><span class="plot-number lavender">01</span><h2>Luminance response</h2></div><div class="legend"><span><i class="legend-line original"></i> Original</span><span><i class="legend-line fitted"></i> Gamma fit</span><span><i class="legend-line target"></i> Linear target</span></div><div class="chart-container"><svg id="chart-original" role="img" aria-label="Original luminance response" viewBox="0 0 480 280"></svg><div id="empty-original" class="chart-empty"><strong>Ready to measure</strong><span>Choose your settings and press Measure.</span></div></div></article>
+        <article class="chart-panel panel"><div class="chart-heading"><span class="plot-number sage">02</span><h2>Corrected response</h2></div><div class="legend"><span><i class="legend-line corrected"></i> Corrected · measured</span><span><i class="legend-line target"></i> Linear target</span></div><div class="chart-container"><svg id="chart-corrected" role="img" aria-label="Corrected luminance response" viewBox="0 0 480 280"></svg><div id="empty-corrected" class="chart-empty"><strong>Correction verification</strong><span>The second sweep measures corrected patches.</span></div></div></article>
+      </div>
+      <div class="chart-footer"><span id="chart-caption">Shared axes · Shading ±1 SD</span><span id="session-date"></span></div>
+    </section>
+  </main>
+  <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="dismiss-notice" aria-label="Dismiss notification">×</button></div>
+  <section id="loading-overlay" class="loading-overlay" role="status" aria-live="polite"><div class="loading-card"><span class="brand-mark large">S·</span><span class="spinner"></span><h1 id="loading-title">Starting Spyder Cal</h1><p id="loading-detail">Preparing measurement tools…</p><button id="loading-cancel" class="button" hidden>Cancel</button></div></section>
+  <dialog id="history-dialog"><div class="dialog-heading"><h2>Recent measurements <small id="history-count">0</small></h2><button id="history-close" class="button">Done</button></div><div id="history" class="history"></div></dialog>
+  <dialog id="settings-dialog"><div class="dialog-heading"><h2>Runtime settings</h2><button id="settings-close" class="button">Done</button></div><p id="runtime-help">Select a Python environment with this repository’s requirements installed.</p><label>Measurement runtime<output id="python-path"></output></label><button id="choose-python" class="button">Choose Python…</button><div class="settings-status" id="python-info">Starting Python…</div><details><summary>Advanced USB settings</summary><label>Optional libusb library path<input id="libusb-path" placeholder="Automatic discovery" autocomplete="off"></label></details></dialog>
+</body>
+</html>

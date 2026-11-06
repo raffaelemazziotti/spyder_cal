@@ -5,6 +5,18 @@ PsychoPy. The library supports Linux, Windows, and macOS through PyUSB/libusb.
 
 ## Quick start
 
+For a graphical workflow with repeated measurements, original and corrected
+curves, session history and JSON/CSV/PNG/SVG export, see the
+[Electron desktop app](desktop/README.md).
+
+The simple [download page](https://raffaelemazziotti.github.io/spyder_cal/)
+links to Windows and Linux packages in GitHub Releases. Its static source and
+publishing notes are in [docs](docs/README.md).
+
+Read the [Windows/Linux installation guide](https://raffaelemazziotti.github.io/spyder_cal/installation.html)
+or the [Python API guide](https://raffaelemazziotti.github.io/spyder_cal/api.html)
+for setup, examples and the complete API reference.
+
 Install the Python dependencies in a virtual environment:
 
 ```bash
