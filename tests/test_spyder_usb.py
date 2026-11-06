@@ -92,6 +92,31 @@ class SpyderXUSBTests(unittest.TestCase):
 
         self.find.assert_not_called()
 
+    def test_bundled_libusb_fallback(self):
+        bundled_path = r"C:\\site-packages\\libusb_package\\libusb-1.0.dll"
+        fake_package = types.SimpleNamespace(get_library_path=lambda: bundled_path)
+        self.get_backend.side_effect = [None, self.backend]
+
+        with mock.patch.dict(sys.modules, {"libusb_package": fake_package}):
+            spyder = SpyderX()
+
+        self.assertEqual(self.get_backend.call_count, 2)
+        find_library = self.get_backend.call_args.kwargs["find_library"]
+        self.assertEqual(find_library("libusb-1.0"), bundled_path)
+        self.find.assert_called_once_with(
+            idVendor=0x085C, idProduct=0x0A00, backend=self.backend
+        )
+        spyder.close()
+
+    def test_no_fallback_without_libusb_package(self):
+        self.get_backend.return_value = None
+
+        with mock.patch.dict(sys.modules, {"libusb_package": None}):
+            with self.assertRaisesRegex(RuntimeError, "libusb 1.x backend"):
+                SpyderX()
+
+        self.get_backend.assert_called_once_with()
+
     def test_missing_explicit_libusb_has_path_in_error(self):
         self.get_backend.return_value = None
 

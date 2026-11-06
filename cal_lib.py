@@ -12,6 +12,25 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
 
+def _bundled_libusb_backend():
+    """Return a backend for the libusb DLL shipped with ``libusb-package``.
+
+    Windows has no system libusb, so the automatic discovery normally fails
+    there. ``libusb-package`` (pip-installable) bundles ``libusb-1.0.dll``;
+    returns None when it is not installed.
+    """
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    library_path = libusb_package.get_library_path()
+    if library_path is None:
+        return None
+    return usb.backend.libusb1.get_backend(
+        find_library=lambda _name: str(library_path)
+    )
+
+
 class GammaMeasurement:
     """Result of one or more display-gamma measurement runs."""
 
@@ -108,7 +127,8 @@ class SpyderX:
         Args:
             libusb_path (str, optional): Explicit path to a libusb 1.x shared
                 library. This preserves the existing Windows DLL workflow. If
-                omitted, PyUSB discovers the system libusb automatically.
+                omitted, PyUSB discovers the system libusb automatically and
+                falls back to the DLL bundled with ``libusb-package``.
         """
         self.backend = None
         self.dev = None
@@ -118,6 +138,8 @@ class SpyderX:
 
         if libusb_path is None:
             self.backend = usb.backend.libusb1.get_backend()
+            if self.backend is None:
+                self.backend = _bundled_libusb_backend()
         else:
             self.backend = usb.backend.libusb1.get_backend(
                 find_library=lambda _name: libusb_path
@@ -127,8 +149,9 @@ class SpyderX:
             if libusb_path is None:
                 raise RuntimeError(
                     "PyUSB could not find a libusb 1.x backend. Install libusb-1.0 "
-                    "and make it discoverable by the operating system, or pass "
-                    "libusb_path explicitly."
+                    "and make it discoverable by the operating system (on "
+                    "Windows: pip install libusb-package), or pass libusb_path "
+                    "explicitly."
                 )
             raise RuntimeError(
                 f"PyUSB could not load the libusb 1.x library at: {libusb_path}"

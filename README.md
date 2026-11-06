@@ -147,18 +147,26 @@ python diagnostics/test_spyder.py
 
 ## Windows setup
 
-The existing Windows workflow is unchanged. The SpyderX must use a
-libusb-compatible driver, such as libusbK installed with
-[Zadig](https://zadig.akeo.ie/). Carefully select the SpyderX (`085c:0a00`);
-replacing another device's driver can disable that device until restored.
-
-When `libusb-1.0.dll` is on the normal DLL search path, use the same API as
-Linux and macOS:
+On Windows `requirements-usb.txt` also installs
+[`libusb-package`](https://pypi.org/project/libusb-package/), which ships
+`libusb-1.0.dll`. When no system libusb is found, `SpyderX()` uses that bundled
+DLL, so the same API as Linux and macOS works without any manual DLL setup:
 
 ```python
 with SpyderX() as spyder:
     result = spyder.measure_gamma()
 ```
+
+**Driver.** The SpyderX must use a libusb-compatible driver. If Datacolor's
+software has been installed, the device usually already uses **WinUSB**, which
+libusb supports directly: in Device Manager it appears as "Datacolor SpyderX"
+under *Universal Serial Bus devices* (driver service `WINUSB`). In that case no
+driver change is needed and Datacolor's software keeps working.
+
+Only if the device shows up without a driver (or under another class), install
+WinUSB or libusbK with [Zadig](https://zadig.akeo.ie/). Carefully select the
+SpyderX (`085c:0a00`); replacing another device's driver can disable that
+device until restored.
 
 The explicit DLL workflow remains supported:
 
@@ -233,7 +241,10 @@ device is managed elsewhere.
 
 - **Device not found:** check the cable and run `lsusb -d 085c:0a00` on Linux.
 - **Permission denied on Linux:** install the included udev rule and reconnect.
-- **No libusb backend:** install the native libusb package for your platform.
+- **No libusb backend:** install the native libusb package for your platform
+  (on Windows: `pip install libusb-package`).
+- **Device not found on Windows:** check in Device Manager that the SpyderX
+  (`085c:0a00`) has a WinUSB or libusbK driver (see *Windows setup*).
 - **PsychoPy import failure:** install `requirements.txt` in a PsychoPy-supported
   Python environment.
 - **Wrong display:** pass the correct PsychoPy `screen` number.

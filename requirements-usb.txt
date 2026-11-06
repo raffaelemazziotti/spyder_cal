@@ -2,3 +2,4 @@ numpy
 scipy
 matplotlib
 pyusb
+libusb-package; sys_platform == "win32"
